@@ -1,4 +1,4 @@
-module byteless
+module github.com/OmarNaru1110/byteless
 
 go 1.23
 
