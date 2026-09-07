@@ -28,6 +28,10 @@ func NewFfmpegBuilder(ffmpegPath string) *FfmpegBuilder {
 	}
 }
 
+func (b *FfmpegBuilder) GetFfmpegPath() string {
+	return b.ffmpegPath
+}
+
 func (b *FfmpegBuilder) SetInputFilePath(inputFilePath string) *FfmpegBuilder {
 	b.options.inputFilePath = inputFilePath
 	log.Printf("FfmpegBuilder: input file path set to %q", inputFilePath)
