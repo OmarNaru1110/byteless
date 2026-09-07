@@ -12,8 +12,14 @@ import (
 	"github.com/OmarNaru1110/byteless/internal/builder"
 )
 
-type FfmpegCommand struct {
-	Builder *builder.FfmpegBuilder
+type TwoPassEncodePass1Command struct {
+	builder *builder.FfmpegBuilder
+}
+
+func NewTwoPassEncodePass1Command() *TwoPassEncodePass1Command {
+	return &TwoPassEncodePass1Command{
+		builder: builder.NewFfmpegBuilder("ffmpeg"), //complete the command list,
+	}
 }
 
 var durationRe = regexp.MustCompile(`Duration:\s*(\d{2}):(\d{2}):(\d{2})\.(\d{2})`)
@@ -27,38 +33,32 @@ func parseTimeToSeconds(h, m, s, cs string) float64 {
 	return hours*3600 + minutes*60 + seconds + centiseconds/100
 }
 
-func (c *FfmpegCommand) Execute(args any) (any, error) {
-	if c.Builder == nil {
+func (c *TwoPassEncodePass1Command) Execute() error {
+	if c.builder == nil {
 		err := fmt.Errorf("FfmpegBuilder is nil")
-		log.Printf("FfmpegCommand: Builder validation failed: %v", err)
-		return nil, err
+		log.Printf("TwoPassEncodePass1Command: Builder validation failed: %v", err)
+		return err
 	}
 
-	ffmpegPath := c.Builder.GetFfmpegPath()
+	ffmpegPath := c.builder.GetFfmpegPath()
 
-	var cmdArgs []string
-	switch a := args.(type) {
-	case []string:
-		cmdArgs = a
-	default:
-		return nil, fmt.Errorf("FfmpegCommand: unsupported args type %T, expected []string", args)
-	}
+	cmdArgs := c.builder.Build()
 
 	if len(cmdArgs) == 0 {
-		return nil, fmt.Errorf("FfmpegCommand: no arguments provided")
+		return fmt.Errorf("TwoPassEncodePass1Command: no arguments provided")
 	}
 
-	log.Printf("FfmpegCommand: executing %s %s", ffmpegPath, strings.Join(cmdArgs, " "))
+	log.Printf("TwoPassEncodePass1Command: executing %s %s", ffmpegPath, strings.Join(cmdArgs, " "))
 
 	cmd := exec.Command(ffmpegPath, cmdArgs...)
 
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
-		return nil, fmt.Errorf("FfmpegCommand: failed to create stderr pipe: %w", err)
+		return fmt.Errorf("TwoPassEncodePass1Command: failed to create stderr pipe: %w", err)
 	}
 
 	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("FfmpegCommand: failed to start ffmpeg: %w", err)
+		return fmt.Errorf("TwoPassEncodePass1Command: failed to start ffmpeg: %w", err)
 	}
 
 	var totalSeconds float64
@@ -69,7 +69,7 @@ func (c *FfmpegCommand) Execute(args any) (any, error) {
 		if totalSeconds == 0 {
 			if m := durationRe.FindStringSubmatch(line); m != nil {
 				totalSeconds = parseTimeToSeconds(m[1], m[2], m[3], m[4])
-				log.Printf("FfmpegCommand: detected duration %.2fs", totalSeconds)
+				log.Printf("TwoPassEncodePass1Command: detected duration %.2fs", totalSeconds)
 			}
 		}
 
@@ -88,10 +88,10 @@ func (c *FfmpegCommand) Execute(args any) (any, error) {
 
 	if err := cmd.Wait(); err != nil {
 		fmt.Println()
-		return nil, fmt.Errorf("FfmpegCommand: ffmpeg exited with error: %w", err)
+		return fmt.Errorf("TwoPassEncodePass1Command: ffmpeg exited with error: %w", err)
 	}
 
 	fmt.Println()
-	log.Println("FfmpegCommand: encoding completed successfully")
-	return nil, nil
+	log.Println("TwoPassEncodePass1Command: encoding completed successfully")
+	return nil
 }
