@@ -20,6 +20,10 @@ func NewFfprobeBuilder(ffprobePath string) *FfprobeBuilder {
 	}
 }
 
+func (b *FfprobeBuilder) GetFfprobePath() string {
+	return b.ffprobePath
+}
+
 func (b *FfprobeBuilder) SetLogLevel(logLevel string) *FfprobeBuilder {
 	b.options.logLevel = logLevel
 	log.Printf("FfprobeBuilder: log level set to %q", logLevel)
