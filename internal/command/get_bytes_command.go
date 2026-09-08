@@ -22,7 +22,7 @@ func NewGetBytesCommand() *GetBytesCommand {
 	}
 }
 
-func (c *GetBytesCommand) Execute() (int, error) {
+func (c *GetBytesCommand) Execute() (int64, error) {
 	if c.builder == nil {
 		err := fmt.Errorf("FfprobeBuilder is nil")
 		log.Printf("GetBytesCommand: Builder validation failed: %v", err)
@@ -78,7 +78,7 @@ func (c *GetBytesCommand) Execute() (int, error) {
 		return 0, fmt.Errorf("GetBytesCommand: no output from command")
 	}
 
-	bytes, err := strconv.Atoi(stdoutStr)
+	bytes, err := strconv.ParseInt(stdoutStr, 10, 64)
 	if err != nil {
 		return 0, fmt.Errorf("GetBytesCommand: failed to parse output %q: %w", stdoutStr, err)
 	}
