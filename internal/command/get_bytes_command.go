@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"os"
 	"os/exec"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -16,10 +18,30 @@ type GetBytesCommand struct {
 	builder *builder.FfprobeBuilder
 }
 
-func NewGetBytesCommand() *GetBytesCommand {
-	return &GetBytesCommand{
-		builder: builder.NewFfprobeBuilder("ffprobe"), // complete the command list
+func NewGetBytesCommand(inputFilePath string) (*GetBytesCommand, error) {
+	_, err := os.Stat(inputFilePath)
+	if err != nil {
+		log.Fatalf("Failed to stat input file: %v", err)
+		return nil, err
 	}
+
+	var ffprobePath string
+	switch os := runtime.GOOS; os {
+	case "windows":
+		ffprobePath = "ffprobe.exe"
+	case "darwin", "linux":
+		ffprobePath = "ffprobe"
+	default:
+		return nil, fmt.Errorf("unsupported operating system: %s", os)
+	}
+
+	return &GetBytesCommand{
+		builder: builder.NewFfprobeBuilder(ffprobePath).
+			SetLogLevel("error").
+			SetShowEntries("format=size").
+			SetOutputFormat("default=noprint_wrappers=1:nokey=1").
+			SetInputFilePath(inputFilePath),
+	}, nil
 }
 
 func (c *GetBytesCommand) Execute() (int64, error) {
