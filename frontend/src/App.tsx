@@ -1,8 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-type Screen = 'idle' | 'selected' | 'compressing' | 'done' | 'error'
+type Stage = 'upload' | 'config' | 'progress' | 'result'
 
 interface FileInfo {
   name: string
@@ -11,599 +9,479 @@ interface FileInfo {
   preview?: string
 }
 
-interface Preset {
-  id: string
-  name: string
-  sublabel: string
-  bytes: number
-  platform?: string
-}
-
-// ─── Constants ────────────────────────────────────────────────────────────────
-
-const PRESETS: Preset[] = [
-  { id: 'discord',     name: 'Discord',      sublabel: '8 MB',  bytes: 8  * 1024 * 1024, platform: 'Free' },
-  { id: 'nitro',       name: 'Nitro',        sublabel: '25 MB', bytes: 25 * 1024 * 1024, platform: 'Discord' },
-  { id: 'email',       name: 'Email',        sublabel: '10 MB', bytes: 10 * 1024 * 1024 },
-  { id: 'custom',      name: 'Custom',       sublabel: '…',     bytes: 0 },
-]
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
 function fmt(bytes: number): string {
   if (bytes === 0) return '0 B'
   if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(0) + ' KB'
   return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
 }
 
-function isImage(t: string) { return t.startsWith('image/') }
-function isVideo(t: string) { return t.startsWith('video/') }
-
-function compressionStage(p: number) {
-  if (p < 25) return 'Reading file…'
-  if (p < 55) return 'Finding the best quality…'
-  if (p < 82) return 'Compressing…'
-  return 'Wrapping up…'
+function formatDuration(seconds: number): string {
+  const m = Math.floor(seconds / 60)
+  const s = Math.floor(seconds % 60)
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
 }
 
-// ─── Tokens ───────────────────────────────────────────────────────────────────
-
-const C = {
-  bg:           '#090910',
-  panel:        '#111118',
-  raised:       '#18181f',
-  hover:        '#1f1f28',
-  border:       'rgba(255,255,255,0.07)',
-  borderMid:    'rgba(255,255,255,0.12)',
-  borderStrong: 'rgba(255,255,255,0.18)',
-  text:         '#e8e8f0',
-  muted:        'rgba(232,232,240,0.42)',
-  faint:        'rgba(232,232,240,0.22)',
-  accent:       '#7c6af7',
-  accentHover:  '#9283ff',
-  accentDim:    'rgba(124,106,247,0.14)',
-  accentGlow:   'rgba(124,106,247,0.30)',
-  green:        '#34d399',
-  greenDim:     'rgba(52,211,153,0.12)',
-  amber:        '#fbbf24',
-  amberDim:     'rgba(251,191,36,0.10)',
-  red:          '#f87171',
-  redDim:       'rgba(248,113,113,0.12)',
-  mono:         'JetBrains Mono, ui-monospace, monospace',
-  sans:         'Outfit, ui-sans-serif, system-ui, sans-serif',
-}
-
-// ─── Micro components ─────────────────────────────────────────────────────────
-
-function MonoTag({ children, color = C.muted }: { children: React.ReactNode; color?: string }) {
-  return (
-    <span style={{ fontFamily: C.mono, fontSize: 11, letterSpacing: '0.06em', color, fontWeight: 400 }}>
-      {children}
-    </span>
-  )
-}
-
-function Divider() {
-  return <div style={{ height: 1, background: C.border }} />
-}
-
-// ─── Drop zone ────────────────────────────────────────────────────────────────
-
-function IdleScreen({ onFile }: { onFile: (f: File) => void }) {
+export default function App() {
+  const [stage, setStage] = useState<Stage>('upload')
+  const [file, setFile] = useState<FileInfo | null>(null)
+  const [targetMB, setTargetMB] = useState(1)
+  const [targetInput, setTargetInput] = useState('1')
+  const [progress, setProgress] = useState(15)
+  const [passTitle, setPassTitle] = useState('Pass 1 of 2: Analyzing bitrate...')
+  const [supportModal, setSupportModal] = useState(false)
+  const [supportView, setSupportView] = useState<'main' | 'vodafone'>('main')
+  const [copied, setCopied] = useState(false)
   const [drag, setDrag] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  const originalSize = file ? file.rawSize : 320.4 * 1024 * 1024
+  const originalMB = originalSize / (1024 * 1024)
+  const rawTarget = parseInt(targetInput)
+  const effectiveMB = !isNaN(rawTarget) && rawTarget >= 1 ? rawTarget : targetMB
+  const reductionPct = effectiveMB >= originalMB
+    ? '0.0'
+    : Math.max(0, ((originalMB - effectiveMB) / originalMB) * 100).toFixed(1)
+  const isOverOriginal = !isNaN(rawTarget) && rawTarget >= originalMB
+
+  const loadFile = useCallback((f: File) => {
+    const info: FileInfo = { name: f.name, rawSize: f.size, type: f.type }
+    if (f.size < 15 * 1024 * 1024) {
+      info.preview = URL.createObjectURL(f)
+    }
+    setFile(info)
+    setStage('config')
+    const mb = Math.max(1, Math.floor(f.size / (1024 * 1024) / 4))
+    setTargetMB(mb)
+    setTargetInput(String(mb))
+  }, [])
 
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault()
     setDrag(false)
     const f = e.dataTransfer.files[0]
-    if (f) onFile(f)
+    if (f) loadFile(f)
   }
 
-  return (
-    <div className="anim-fadeup" style={{ padding: '12px' }}>
-      <div
-        onDragOver={e => { e.preventDefault(); setDrag(true) }}
-        onDragLeave={() => setDrag(false)}
-        onDrop={onDrop}
-        onClick={() => inputRef.current?.click()}
-        style={{
-          position: 'relative',
-          borderRadius: 14,
-          border: `1.5px dashed ${drag ? C.accent : C.borderMid}`,
-          background: drag ? C.accentDim : 'transparent',
-          padding: '52px 24px 48px',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          cursor: 'pointer',
-          transition: 'all 0.18s ease',
-          overflow: 'hidden',
-        }}
-      >
-        {/* Ambient glow on drag */}
-        {drag && (
-          <div style={{
-            position: 'absolute', inset: 0, borderRadius: 14,
-            background: `radial-gradient(ellipse at 50% 40%, ${C.accentGlow}, transparent 70%)`,
-            pointerEvents: 'none',
-          }} />
-        )}
-
-        {/* Upload icon */}
-        <div style={{
-          width: 56, height: 56, borderRadius: 14, marginBottom: 20,
-          background: drag ? C.accentDim : C.raised,
-          border: `1px solid ${drag ? C.accent : C.borderStrong}`,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          transition: 'all 0.18s',
-          position: 'relative', zIndex: 1,
-        }}>
-          <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
-            <path d="M11 14.5V5M11 5L7.5 8.5M11 5L14.5 8.5"
-              stroke={drag ? C.accent : C.muted}
-              strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"
-            />
-            <path d="M3.5 15.5C3.5 17.16 4.84 18.5 6.5 18.5h9c1.66 0 3-1.34 3-3"
-              stroke={drag ? C.accent : C.faint}
-              strokeWidth="1.5" strokeLinecap="round"
-            />
-          </svg>
-        </div>
-
-        <p style={{ margin: '0 0 6px', fontSize: 17, fontWeight: 600, color: drag ? '#fff' : C.text, position: 'relative', zIndex: 1, transition: 'color 0.15s' }}>
-          {drag ? 'Drop to compress' : 'Drop your file here'}
-        </p>
-
-        <button
-          onClick={e => { e.stopPropagation(); inputRef.current?.click() }}
-          style={{
-            padding: '9px 22px',
-            borderRadius: 8,
-            background: C.raised,
-            border: `1px solid ${C.borderStrong}`,
-            color: C.text,
-            fontSize: 13.5,
-            fontWeight: 500,
-            cursor: 'pointer',
-            fontFamily: C.sans,
-            position: 'relative', zIndex: 1,
-            transition: 'background 0.12s, border-color 0.12s',
-          }}
-          onMouseEnter={e => { e.currentTarget.style.background = C.hover; e.currentTarget.style.borderColor = C.borderStrong }}
-          onMouseLeave={e => { e.currentTarget.style.background = C.raised; e.currentTarget.style.borderColor = C.borderStrong }}
-        >
-          Choose File
-        </button>
-        <input ref={inputRef} type="file" accept="image/*,video/*" style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) onFile(f) }} />
-      </div>
-
-
-    </div>
-  )
-}
-
-// ─── File header ──────────────────────────────────────────────────────────────
-
-function FileHeader({ file, onClear }: { file: FileInfo; onClear: () => void }) {
-  return (
-    <div style={{
-      display: 'flex', alignItems: 'center', gap: 12,
-      padding: '16px 20px',
-      background: C.raised,
-      borderRadius: 12,
-    }}>
-      {file.preview
-        ? <img src={file.preview} alt="" style={{ width: 44, height: 44, borderRadius: 8, objectFit: 'cover', flexShrink: 0 }} />
-        : (
-          <div style={{
-            width: 44, height: 44, borderRadius: 8, flexShrink: 0,
-            background: C.panel, border: `1px solid ${C.border}`,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}>
-            <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-              {isVideo(file.type)
-                ? <path d="M4 5.5A1.5 1.5 0 015.5 4h5.586a1.5 1.5 0 011.06.44l3.415 3.414a1.5 1.5 0 01.439 1.06V14.5A1.5 1.5 0 0114.5 16h-9A1.5 1.5 0 014 14.5v-9z" stroke={C.muted} strokeWidth="1.3"/>
-                : <><rect x="4" y="3" width="12" height="14" rx="2" stroke={C.muted} strokeWidth="1.3"/><path d="M7 7.5h6M7 10h4" stroke={C.muted} strokeWidth="1.3" strokeLinecap="round"/></>
-              }
-            </svg>
-          </div>
-        )
-      }
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <p style={{ margin: 0, fontSize: 13.5, fontWeight: 500, color: C.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {file.name}
-        </p>
-        <MonoTag>{fmt(file.rawSize)}</MonoTag>
-      </div>
-      <button onClick={onClear} title="Remove" style={{
-        background: 'none', border: 'none', cursor: 'pointer',
-        color: C.faint, padding: 4, borderRadius: 6, flexShrink: 0,
-        transition: 'color 0.12s',
-        display: 'flex', alignItems: 'center',
-      }}
-        onMouseEnter={e => e.currentTarget.style.color = C.muted}
-        onMouseLeave={e => e.currentTarget.style.color = C.faint}
-      >
-        <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-          <path d="M3 3L11 11M11 3L3 11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-        </svg>
-      </button>
-    </div>
-  )
-}
-
-// ─── Selected screen ──────────────────────────────────────────────────────────
-
-function SelectedScreen({
-  file, onCompress, onClear,
-}: {
-  file: FileInfo
-  onCompress: (targetBytes: number) => void
-  onClear: () => void
-}) {
-  const [preset, setPreset] = useState(0)
-  const [customMB, setCustomMB] = useState('5')
-
-  const targetBytes = preset === 3
-    ? (parseFloat(customMB) || 5) * 1024 * 1024
-    : PRESETS[preset].bytes
-
-  const alreadyFits = file.rawSize <= targetBytes
-
-  return (
-    <div className="anim-fadeup" style={{ padding: '24px 28px 28px', display: 'flex', flexDirection: 'column', gap: 22 }}>
-      <FileHeader file={file} onClear={onClear} />
-
-      {/* Section: target size */}
-      <div>
-        <p style={{ margin: '0 0 11px', fontSize: 11.5, fontWeight: 600, letterSpacing: '0.09em', color: C.muted, textTransform: 'uppercase', fontFamily: C.mono }}>
-          What size do you need?
-        </p>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-          {PRESETS.map((p, i) => {
-            const active = preset === i
-            return (
-              <button key={p.id} onClick={() => setPreset(i)} style={{
-                padding: '13px 14px',
-                borderRadius: 10,
-                border: `1px solid ${active ? C.accent : C.border}`,
-                background: active ? C.accentDim : C.raised,
-                cursor: 'pointer',
-                textAlign: 'left',
-                fontFamily: C.sans,
-                transition: 'all 0.14s',
-                position: 'relative',
-                overflow: 'hidden',
-              }}
-                onMouseEnter={e => { if (!active) e.currentTarget.style.background = C.hover }}
-                onMouseLeave={e => { if (!active) e.currentTarget.style.background = C.raised }}
-              >
-                {active && (
-                  <div style={{
-                    position: 'absolute', inset: 0,
-                    background: `radial-gradient(ellipse at 20% 50%, ${C.accentGlow}, transparent 70%)`,
-                    pointerEvents: 'none',
-                  }} />
-                )}
-                <div style={{ position: 'relative' }}>
-                  <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: active ? '#fff' : C.text }}>{p.name}</p>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 3 }}>
-                    <MonoTag color={active ? C.accent : C.muted}>{p.sublabel}</MonoTag>
-                    {p.platform && <span style={{ fontSize: 11, color: C.faint }}>{p.platform}</span>}
-                  </div>
-                </div>
-              </button>
-            )
-          })}
-        </div>
-
-        {/* Custom input */}
-        {preset === 3 && (
-          <div className="anim-fadein" style={{
-            marginTop: 10,
-            display: 'flex', alignItems: 'center', gap: 10,
-            padding: '11px 14px',
-            background: C.raised,
-            border: `1px solid ${C.borderMid}`,
-            borderRadius: 10,
-          }}>
-            <span style={{ fontSize: 13.5, color: C.muted, flex: 1 }}>Make it fit under</span>
-            <input
-              autoFocus
-              type="number" min="1" max="2000"
-              value={customMB}
-              onChange={e => setCustomMB(e.target.value)}
-              style={{
-                background: 'transparent', border: 'none', outline: 'none',
-                color: C.text, fontSize: 16, fontWeight: 600,
-                fontFamily: C.mono, width: 52, textAlign: 'right',
-                MozAppearance: 'textfield',
-              } as React.CSSProperties}
-            />
-            <span style={{ fontSize: 13.5, color: C.muted }}>MB</span>
-          </div>
-        )}
-      </div>
-
-      {/* Warning: already fits */}
-      {alreadyFits && (
-        <div className="anim-fadein" style={{
-          display: 'flex', gap: 10, padding: '12px 14px',
-          background: C.amberDim,
-          border: `1px solid rgba(251,191,36,0.22)`,
-          borderRadius: 10,
-        }}>
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0, marginTop: 1 }}>
-            <path d="M8 2L14 13H2L8 2Z" stroke={C.amber} strokeWidth="1.3" strokeLinejoin="round"/>
-            <path d="M8 6.5V9.5" stroke={C.amber} strokeWidth="1.3" strokeLinecap="round"/>
-            <circle cx="8" cy="11.5" r="0.6" fill={C.amber}/>
-          </svg>
-          <p style={{ margin: 0, fontSize: 12.5, color: C.amber, lineHeight: 1.55 }}>
-            Already under {fmt(targetBytes)} — you can still compress for a smaller result.
-          </p>
-        </div>
-      )}
-
-      <Divider />
-
-      {/* CTA */}
-      <button
-        onClick={() => onCompress(targetBytes)}
-        style={{
-          width: '100%', padding: '14px',
-          borderRadius: 11,
-          background: C.accent,
-          border: 'none',
-          color: '#fff',
-          fontSize: 15, fontWeight: 600,
-          cursor: 'pointer', fontFamily: C.sans,
-          transition: 'background 0.14s, box-shadow 0.14s',
-          boxShadow: `0 0 0 0 ${C.accentGlow}`,
-          letterSpacing: '0.01em',
-        }}
-        onMouseEnter={e => { e.currentTarget.style.background = C.accentHover; e.currentTarget.style.boxShadow = `0 4px 24px ${C.accentGlow}` }}
-        onMouseLeave={e => { e.currentTarget.style.background = C.accent; e.currentTarget.style.boxShadow = `0 0 0 0 ${C.accentGlow}` }}
-      >
-        Compress
-      </button>
-    </div>
-  )
-}
-
-// ─── Compressing screen ───────────────────────────────────────────────────────
-
-function CompressingScreen({ progress, file }: { progress: number; file: FileInfo }) {
-  const r = 42
-  const circ = 2 * Math.PI * r
-  const filledArc = (progress / 100) * circ
-
-  return (
-    <div className="anim-fadeup" style={{ padding: '32px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0 }}>
-      {/* Ring */}
-      <div style={{ position: 'relative', width: 108, height: 108, marginBottom: 28 }}>
-        {/* Ambient pulse */}
-        <div style={{
-          position: 'absolute', inset: -12,
-          borderRadius: '50%',
-          background: C.accentGlow,
-          animation: 'pulse-ring 2.4s ease-in-out infinite',
-        }} />
-        <svg width="108" height="108" viewBox="0 0 108 108" fill="none" style={{ position: 'relative', zIndex: 1, transform: 'rotate(-90deg)' }}>
-          <circle cx="54" cy="54" r={r} stroke={C.border} strokeWidth="3" />
-          <circle
-            cx="54" cy="54" r={r}
-            stroke={C.accent}
-            strokeWidth="3"
-            strokeLinecap="round"
-            strokeDasharray={`${filledArc} ${circ - filledArc}`}
-            style={{ transition: 'stroke-dasharray 0.12s linear', filter: `drop-shadow(0 0 6px ${C.accent})` }}
-          />
-        </svg>
-        {/* Center pct */}
-        <div style={{
-          position: 'absolute', inset: 0, zIndex: 2,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }}>
-          <span style={{ fontFamily: C.mono, fontSize: 15, fontWeight: 500, color: C.text }}>
-            {Math.round(progress)}%
-          </span>
-        </div>
-      </div>
-
-      <p style={{ margin: 0, fontSize: 13, color: C.muted }}>
-        <MonoTag>{file.name.length > 32 ? file.name.slice(0, 29) + '…' : file.name}</MonoTag>
-      </p>
-    </div>
-  )
-}
-
-// ─── Done screen ──────────────────────────────────────────────────────────────
-
-function DoneScreen({ file, resultSize, onReset }: { file: FileInfo; resultSize: number; onReset: () => void }) {
-  const saved = file.rawSize - resultSize
-  const pct = Math.round((saved / file.rawSize) * 100)
-  const barWidth = Math.round((resultSize / file.rawSize) * 100)
-
-  return (
-    <div className="anim-fadeup" style={{ padding: '24px 28px 28px', display: 'flex', flexDirection: 'column', gap: 20 }}>
-      {/* Success header */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-        <div style={{
-          width: 44, height: 44, borderRadius: '50%', flexShrink: 0,
-          background: C.greenDim, border: `1px solid ${C.green}`,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          boxShadow: `0 0 16px rgba(52,211,153,0.2)`,
-        }}>
-          <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-            <path d="M4 9L7.5 12.5L14 5.5" stroke={C.green} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-          </svg>
-        </div>
-        <div>
-          <p style={{ margin: 0, fontSize: 17, fontWeight: 700, color: C.text }}>Ready to send</p>
-          <p style={{ margin: '3px 0 0', fontSize: 13, color: C.muted }}>Your file fits the limit</p>
-        </div>
-      </div>
-
-      <Divider />
-
-      {/* Buttons */}
-      <button style={{
-        width: '100%', padding: '14px',
-        borderRadius: 11,
-        background: C.green,
-        border: 'none', color: '#001f14',
-        fontSize: 15, fontWeight: 700,
-        cursor: 'pointer', fontFamily: C.sans,
-        transition: 'background 0.14s, box-shadow 0.14s',
-        boxShadow: `0 4px 20px rgba(52,211,153,0.25)`,
-      }}
-        onMouseEnter={e => { e.currentTarget.style.background = '#4ade80' }}
-        onMouseLeave={e => { e.currentTarget.style.background = C.green }}
-      >
-        Save File
-      </button>
-
-      <button onClick={onReset} style={{
-        width: '100%', padding: '12px',
-        borderRadius: 11, background: 'transparent',
-        border: `1px solid ${C.border}`,
-        color: C.muted, fontSize: 14,
-        cursor: 'pointer', fontFamily: C.sans,
-        transition: 'border-color 0.12s, color 0.12s',
-      }}
-        onMouseEnter={e => { e.currentTarget.style.borderColor = C.borderMid; e.currentTarget.style.color = C.text }}
-        onMouseLeave={e => { e.currentTarget.style.borderColor = C.border; e.currentTarget.style.color = C.muted }}
-      >
-        Compress another file
-      </button>
-    </div>
-  )
-}
-
-// ─── Error screen ─────────────────────────────────────────────────────────────
-
-function ErrorScreen({ message, onRetry, onReset }: { message: string; onRetry: () => void; onReset: () => void }) {
-  return (
-    <div className="anim-fadeup" style={{ padding: '32px', textAlign: 'center' }}>
-      <div style={{
-        width: 52, height: 52, borderRadius: '50%', margin: '0 auto 22px',
-        background: C.redDim, border: `1px solid ${C.red}`,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-      }}>
-        <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-          <path d="M10 5.5V11" stroke={C.red} strokeWidth="1.8" strokeLinecap="round"/>
-          <circle cx="10" cy="14.5" r="1.1" fill={C.red}/>
-        </svg>
-      </div>
-      <p style={{ margin: '0 0 10px', fontSize: 17, fontWeight: 700, color: C.text }}>Something went wrong</p>
-      <p style={{ margin: '0 0 30px', fontSize: 13.5, color: C.muted, lineHeight: 1.65, maxWidth: 320, marginLeft: 'auto', marginRight: 'auto' }}>
-        {message}
-      </p>
-      <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
-        <button onClick={onRetry} style={{
-          padding: '10px 22px', borderRadius: 9,
-          background: C.raised, border: `1px solid ${C.borderStrong}`,
-          color: C.text, fontSize: 13.5, fontWeight: 500,
-          cursor: 'pointer', fontFamily: C.sans,
-        }}>
-          Try a larger limit
-        </button>
-        <button onClick={onReset} style={{
-          padding: '10px 22px', borderRadius: 9,
-          background: 'transparent', border: `1px solid ${C.border}`,
-          color: C.muted, fontSize: 13.5,
-          cursor: 'pointer', fontFamily: C.sans,
-        }}>
-          Start over
-        </button>
-      </div>
-    </div>
-  )
-}
-
-// ─── Root ─────────────────────────────────────────────────────────────────────
-
-export default function App() {
-  const [screen, setScreen] = useState<Screen>('idle')
-  const [file, setFile] = useState<FileInfo | null>(null)
-  const [progress, setProgress] = useState(0)
-  const [resultSize, setResultSize] = useState(0)
-  const [errorMsg, setErrorMsg] = useState('')
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const inputRef = useRef<HTMLInputElement>(null)
-
-  const loadFile = useCallback((f: File) => {
-    const info: FileInfo = { name: f.name, rawSize: f.size, type: f.type }
-    if ((isImage(f.type) && f.size < 15 * 1024 * 1024) || (isVideo(f.type) && f.size < 8 * 1024 * 1024)) {
-      info.preview = URL.createObjectURL(f)
-    }
-    setFile(info)
-    setScreen('selected')
+  const startCompression = () => {
+    setStage('progress')
     setProgress(0)
-    setResultSize(0)
-    setErrorMsg('')
-  }, [])
+    setPassTitle('Pass 1 of 2: Analyzing bitrate...')
 
-  const startCompress = useCallback((targetBytes: number) => {
-    if (!file) return
-    setScreen('compressing')
-    setProgress(0)
-
+    let pass = 1
     let p = 0
     timerRef.current = setInterval(() => {
-      const step = Math.random() * 3.5 + 1.2
-      p = Math.min(p + step, 100)
-      setProgress(p)
-
+      p += 2
       if (p >= 100) {
-        clearInterval(timerRef.current!)
-        const ratio = targetBytes / file.rawSize
-        if (ratio < 0.04) {
-          setTimeout(() => {
-            setErrorMsg("That size limit is too small for this file — we can't compress it that far without making it unusable. Try a larger limit.")
-            setScreen('error')
-          }, 350)
+        if (pass === 1) {
+          pass = 2
+          p = 0
+          setProgress(0)
+          setPassTitle('Pass 2 of 2: Compressing video...')
         } else {
-          const simulated = file.rawSize <= targetBytes
-            ? file.rawSize * (0.82 + Math.random() * 0.12)
-            : targetBytes * (0.86 + Math.random() * 0.1)
-          setTimeout(() => {
-            setResultSize(simulated)
-            setScreen('done')
-          }, 350)
+          clearInterval(timerRef.current!)
+          setStage('result')
         }
+        return
       }
-    }, 75)
-  }, [file])
-
-  useEffect(() => () => { if (timerRef.current) clearInterval(timerRef.current) }, [])
-
-  const reset = () => {
-    setScreen('idle')
-    setFile(null)
-    setProgress(0)
-    setResultSize(0)
-    setErrorMsg('')
-    if (inputRef.current) inputRef.current.value = ''
+      setProgress(p)
+    }, 80)
   }
 
+  const cancelCompression = () => {
+    if (timerRef.current) clearInterval(timerRef.current)
+    setStage('config')
+  }
+
+  const reset = () => {
+    if (timerRef.current) clearInterval(timerRef.current)
+    setStage('upload')
+    setFile(null)
+    setProgress(15)
+  }
+
+  const copyVodafoneNumber = () => {
+    navigator.clipboard.writeText('+201006311537').then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1800)
+    })
+  }
+
+  useEffect(() => () => { if (timerRef.current) clearInterval(timerRef.current) }, [])
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setSupportModal(false)
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [])
+
+  const circumference = 2 * Math.PI * 42
+
   return (
-    <div style={{
-      width: '100vw', height: '100vh',
-      background: C.panel,
-      fontFamily: C.sans,
-      overflow: 'hidden',
-      display: 'flex', flexDirection: 'column',
-    }}>
-      {/* Screen content */}
-      <div key={screen} style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', overflow: 'auto' }}>
-        {screen === 'idle'        && <IdleScreen onFile={loadFile} />}
-        {screen === 'selected'    && file && <SelectedScreen file={file} onCompress={startCompress} onClear={reset} />}
-        {screen === 'compressing' && file && <CompressingScreen progress={progress} file={file} />}
-        {screen === 'done'        && file && <DoneScreen file={file} resultSize={resultSize} onReset={reset} />}
-        {screen === 'error'       && <ErrorScreen message={errorMsg} onRetry={() => setScreen('selected')} onReset={reset} />}
-      </div>
+    <div className="min-h-screen flex flex-col bg-bg text-fg font-sans select-none overflow-x-hidden">
+      {/* Top Window Bar */}
+      <header className="h-12 border-b border-border/70 flex items-center justify-between px-5 shrink-0 bg-bg">
+        <div className="flex items-center gap-4">
+          <span className="font-medium text-sm tracking-tight text-fg">Byteless</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            className="p-1.5 rounded-md hover:bg-card border border-transparent hover:border-border text-muted hover:text-red-400 transition-all flex items-center justify-center"
+            onClick={() => { setSupportView('main'); setSupportModal(true) }}
+            title="Support Byto"
+          >
+            <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" viewBox="0 0 24 24">
+              <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z" />
+            </svg>
+          </button>
+        </div>
+      </header>
+
+      {/* Main Workspace */}
+      <main className="flex-1 flex items-center justify-center p-6 w-full max-w-xl mx-auto">
+
+        {/* Stage 1: Upload */}
+        {stage === 'upload' && (
+          <div className="w-full flex-col items-center justify-center animate-fadeIn flex">
+            <div
+              className={`group w-full h-80 rounded-2xl border border-dashed border-border hover:border-zinc-500 bg-card/40 hover:bg-card/90 transition-all duration-200 cursor-pointer flex flex-col items-center justify-center p-8 text-center relative overflow-hidden ${drag ? 'border-zinc-500 bg-card/90' : ''}`}
+              onDragOver={e => { e.preventDefault(); setDrag(true) }}
+              onDragLeave={() => setDrag(false)}
+              onDrop={onDrop}
+              onClick={() => inputRef.current?.click()}
+            >
+              <div className={`w-14 h-14 rounded-2xl bg-subtle border border-border flex items-center justify-center mb-5 transition-all ${drag ? 'text-fg scale-105' : 'text-secondary group-hover:text-fg group-hover:scale-105'}`}>
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
+                  <path d="M3 16V6a3 3 0 0 1 3-3h7.5a3 3 0 0 1 2.1.86l3.4 3.4A3 3 0 0 1 19.5 8H21" strokeLinecap="round" strokeLinejoin="round" />
+                  <path d="M3 16l3.5-3.5M6.5 12.5L10 16" strokeLinecap="round" strokeLinejoin="round" />
+                  <path d="M3 16h14a3 3 0 0 0 3-3v-2" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </div>
+              <h2 className="text-base font-medium text-fg mb-1.5">{drag ? 'Drop to compress' : 'Drop video here or click to browse'}</h2>
+              <p className="text-xs text-muted max-w-xs mb-5">Supports MP4, MOV, MKV, and WebM</p>
+            </div>
+            <input ref={inputRef} type="file" accept="video/*" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) loadFile(f) }} />
+          </div>
+        )}
+
+        {/* Stage 2: Config */}
+        {stage === 'config' && file && (
+          <div className="w-full flex-col animate-fadeIn flex">
+            <div className="w-full rounded-2xl border border-border bg-card p-6 shadow-xl space-y-6">
+              {/* Video Details */}
+              <div className="flex items-center justify-between pb-5 border-b border-border/80">
+                <div className="flex items-center gap-3.5 min-w-0">
+                  <div className="w-11 h-11 rounded-xl bg-subtle border border-border flex items-center justify-center text-muted shrink-0">
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
+                      <path d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium text-fg truncate">{file.name}</div>
+                    <div className="text-xs text-muted font-mono mt-0.5 flex items-center gap-2">
+                      <span>{fmt(file.rawSize)}</span>
+                      <span>&#8226;</span>
+                      <span>{formatDuration(file.rawSize / (2 * 1024 * 1024))}</span>
+                    </div>
+                  </div>
+                </div>
+                <button
+                  className="text-xs text-muted hover:text-fg px-2 py-1 rounded hover:bg-subtle border border-transparent hover:border-border transition-all"
+                  onClick={reset}
+                >
+                  Change
+                </button>
+              </div>
+
+              {/* Target Size */}
+              <div className="space-y-3">
+                <label className="text-xs font-medium text-secondary uppercase tracking-wider">Desired Target Size</label>
+                <div className="relative flex items-center">
+                  <input
+                    className="w-full bg-subtle border border-border focus:border-zinc-400 focus:ring-0 text-fg text-2xl font-mono font-medium rounded-xl px-4 py-3 h-14 outline-none transition-colors [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    value={targetInput}
+                    onChange={e => {
+                      const raw = e.target.value.replace(/[^0-9]/g, '')
+                      setTargetInput(raw)
+                      const v = parseInt(raw)
+                      if (!isNaN(v) && v >= 1) {
+                        setTargetMB(v)
+                      }
+                    }}
+                    onBlur={() => {
+                      const v = parseInt(targetInput)
+                      if (isNaN(v) || v < 1) {
+                        setTargetMB(1)
+                        setTargetInput('1')
+                      } else {
+                        setTargetMB(v)
+                        setTargetInput(String(v))
+                      }
+                    }}
+                  />
+                  <div className="absolute right-4 flex items-center gap-3">
+                    <span className="text-sm font-mono text-muted font-medium pointer-events-none">MB</span>
+                    <div className="flex flex-col border-l border-border pl-3">
+                      <button className="text-muted hover:text-fg text-xs leading-none p-0.5" onClick={() => setTargetMB(t => { const v = t + 1; setTargetInput(String(v)); return v })}>&#9650;</button>
+                      <button className="text-muted hover:text-fg text-xs leading-none p-0.5 mt-1" onClick={() => setTargetMB(t => { const v = Math.max(t - 1, 1); setTargetInput(String(v)); return v })}>&#9660;</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Warning */}
+              {isOverOriginal && (
+                <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20 animate-fadeIn">
+                  <svg className="w-4 h-4 text-amber-400 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                    <path d="M12 9v4M12 17h.01M10.29 3.86l-8.6 14.86A2 2 0 003.4 22h17.2a2 2 0 001.71-3.28l-8.6-14.86a2 2 0 00-3.42 0z" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                  <span className="text-xs text-amber-300">Target size is not smaller than the original ({fmt(file.rawSize)}). Pick a smaller value to compress.</span>
+                </div>
+              )}
+
+              {/* Compress Button */}
+              <button
+                className={`w-full h-12 rounded-xl font-medium text-sm transition-all flex items-center justify-center gap-2 ${isOverOriginal ? 'bg-subtle text-muted border border-border cursor-not-allowed' : 'bg-fg text-bg hover:bg-zinc-200 active:scale-[0.99]'}`}
+                onClick={startCompression}
+                disabled={isOverOriginal}
+              >
+                <span>Compress Video</span>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                  <path d="M5 12h14M12 5l7 7-7 7" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Stage 3: Progress */}
+        {stage === 'progress' && (
+          <div className="w-full flex-col animate-fadeIn flex">
+            <div className="w-full rounded-2xl border border-border bg-card p-8 shadow-xl flex flex-col items-center text-center space-y-6">
+              {/* Circular Progress */}
+              <div className="relative w-36 h-36 flex items-center justify-center my-2">
+                <svg className="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
+                  <circle className="text-subtle" cx="50" cy="50" fill="transparent" r="42" stroke="currentColor" strokeWidth="6" />
+                  <circle
+                    className="text-fg transition-all duration-300 ease-out"
+                    cx="50" cy="50" fill="transparent" r="42"
+                    stroke="currentColor"
+                    strokeDasharray={circumference}
+                    strokeDashoffset={circumference - (progress / 100) * circumference}
+                    strokeLinecap="round" strokeWidth="6"
+                  />
+                </svg>
+                <div className="absolute inset-0 flex flex-col items-center justify-center">
+                  <span className="text-2xl font-mono font-medium text-fg">{progress}%</span>
+                  <span className="text-[11px] font-mono text-muted mt-0.5">{Math.max(0, Math.round((100 - progress) * 0.18))}s left</span>
+                </div>
+              </div>
+
+              {/* Pass Status */}
+              <div className="space-y-1">
+                <h3 className="text-sm font-medium text-fg">{passTitle}</h3>
+                <p className="text-xs text-muted font-mono truncate max-w-sm">
+                  Targeting {effectiveMB} MB
+                </p>
+              </div>
+
+              {/* Actions */}
+              <div className="pt-2 w-full flex items-center justify-center">
+                <button
+                  className="px-4 py-1.5 rounded-lg bg-subtle hover:bg-zinc-800 border border-border text-xs text-secondary hover:text-fg transition-all"
+                  onClick={cancelCompression}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Stage 4: Result */}
+        {stage === 'result' && (
+          <div className="w-full flex-col space-y-4 animate-fadeIn flex">
+            <div className="w-full rounded-2xl border border-border bg-card p-6 shadow-xl space-y-6">
+              {/* Header */}
+              <div className="flex items-center justify-between pb-4 border-b border-border/80">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-full bg-subtle border border-border flex items-center justify-center text-fg">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                      <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </div>
+                  <div>
+                    <div className="text-sm font-medium text-fg">Compression Finished</div>
+                    <div className="text-xs text-muted font-mono">Elapsed time: {Math.round(progress * 0.38)}s</div>
+                  </div>
+                </div>
+                <span className="text-xs font-mono px-2 py-0.5 rounded bg-subtle border border-border text-fg font-medium">-{reductionPct}%</span>
+              </div>
+
+              {/* Size Comparison */}
+              <div className="bg-subtle rounded-xl p-4 border border-border flex items-center justify-between">
+                <div className="space-y-1">
+                  <div className="text-[11px] uppercase tracking-wider text-muted font-medium">Original</div>
+                  <div className="text-base font-mono text-secondary">{fmt(file?.rawSize || 0)}</div>
+                </div>
+                <div className="text-muted text-xs">&rarr;</div>
+                <div className="space-y-1 text-right">
+                  <div className="text-[11px] uppercase tracking-wider text-secondary font-medium">New Size</div>
+                  <div className="text-base font-mono text-fg font-medium">{fmt(effectiveMB * 1024 * 1024)}</div>
+                </div>
+              </div>
+
+              {/* File Details */}
+              <div className="text-xs font-mono text-muted truncate px-1 flex items-center justify-between">
+                <span className="truncate">{file?.name || 'output.mp4'}</span>
+                <span className="shrink-0 text-[11px]">AV1 &bull; 1080p</span>
+              </div>
+
+              {/* Actions */}
+              <div className="space-y-2 pt-1">
+                <button className="w-full h-11 rounded-xl bg-fg text-bg font-medium text-xs hover:bg-zinc-200 transition-all flex items-center justify-center gap-1.5">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                    <path d="M5 3l14 9-14 9V3z" fill="currentColor" />
+                  </svg>
+                  <span>Open File</span>
+                </button>
+                <div className="grid grid-cols-2 gap-2">
+                  <button className="h-10 rounded-xl bg-subtle hover:bg-zinc-800 border border-border text-xs text-secondary hover:text-fg transition-all flex items-center justify-center gap-1.5">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                    <span>Show in Finder</span>
+                  </button>
+                  <button
+                    className="h-10 rounded-xl bg-subtle hover:bg-zinc-800 border border-border text-xs text-secondary hover:text-fg transition-all flex items-center justify-center gap-1.5"
+                    onClick={reset}
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                      <path d="M1 4v6h6M23 20v-6h-6" strokeLinecap="round" strokeLinejoin="round" />
+                      <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                    <span>Compress Another</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </main>
+
+      {/* Support Modal */}
+      {supportModal && (
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4 transition-opacity duration-200">
+          <div className="bg-[#0f1013] border border-[#23252b] rounded-2xl shadow-2xl max-w-[440px] w-full p-6 text-white relative transition-all duration-200">
+            {/* Header */}
+            <div className="flex items-start justify-between">
+              <div>
+                <h2 className="text-lg font-semibold tracking-tight text-zinc-100">Support Byteless</h2>
+                <p className="text-[13px] text-zinc-400 mt-1">If you find Byteless useful, consider supporting the project</p>
+              </div>
+              <button className="text-zinc-400 hover:text-zinc-200 transition-colors -mr-1 -mt-1 p-1" onClick={() => setSupportModal(false)}>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24">
+                  <line x1="18" x2="6" y1="6" y2="18" />
+                  <line x1="6" x2="18" y1="6" y2="18" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Main View */}
+            {supportView === 'main' && (
+              <div className="mt-5 space-y-2.5">
+                {/* Vodafone Cash */}
+                <button className="w-full flex items-center gap-3 px-3.5 py-3 rounded-xl bg-[#17181c] border border-[#262830] hover:bg-[#1f2127] text-left transition-colors group" onClick={() => setSupportView('vodafone')}>
+                  <svg className="w-4 h-4 text-zinc-300 shrink-0" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24">
+                    <rect height="20" rx="2" ry="2" width="14" x="5" y="2" />
+                    <line x1="12" x2="12.01" y1="18" y2="18" />
+                  </svg>
+                  <span className="text-[13px] font-medium text-zinc-200 group-hover:text-white">Support via Vodafone Cash</span>
+                </button>
+
+                {/* Ko-fi */}
+                <a className="w-full flex items-center gap-3 px-3.5 py-3 rounded-xl bg-[#17181c] border border-[#262830] hover:bg-[#1f2127] text-left transition-colors group" href="https://ko-fi.com" target="_blank" rel="noopener noreferrer">
+                  <svg className="w-4 h-4 text-zinc-300 shrink-0" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24">
+                    <path d="M17 8h1a4 4 0 1 1 0 8h-1" />
+                    <path d="M3 8h14v9a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4Z" />
+                    <line x1="6" x2="6" y1="2" y2="4" />
+                    <line x1="10" x2="10" y1="2" y2="4" />
+                    <line x1="14" x2="14" y1="2" y2="4" />
+                  </svg>
+                  <span className="text-[13px] font-medium text-zinc-200 group-hover:text-white">Support me on Ko-fi</span>
+                </a>
+
+                {/* Follow GitHub */}
+                <a className="w-full flex items-center gap-3 px-3.5 py-3 rounded-xl bg-[#17181c] border border-[#262830] hover:bg-[#1f2127] text-left transition-colors group" href="https://github.com" target="_blank" rel="noopener noreferrer">
+                  <svg className="w-4 h-4 text-zinc-300 shrink-0" fill="currentColor" viewBox="0 0 24 24">
+                    <path clipRule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2Z" fillRule="evenodd" />
+                  </svg>
+                  <span className="text-[13px] font-medium text-zinc-200 group-hover:text-white">Follow me on GitHub</span>
+                </a>
+
+                {/* Star GitHub */}
+                <a className="w-full flex items-center gap-3 px-3.5 py-3 rounded-xl bg-[#17181c] border border-[#262830] hover:bg-[#1f2127] text-left transition-colors group" href="https://github.com" target="_blank" rel="noopener noreferrer">
+                  <svg className="w-4 h-4 text-zinc-300 shrink-0" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24">
+                    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                  </svg>
+                  <span className="text-[13px] font-medium text-zinc-200 group-hover:text-white">Star/Contribute to byteless on GitHub</span>
+                </a>
+
+                <div className="pt-4 flex justify-end">
+                  <button className="px-5 py-2 rounded-xl bg-[#0e56c8] hover:bg-[#1466ea] active:scale-[0.98] text-white text-xs font-semibold shadow-md transition-all" onClick={() => setSupportModal(false)}>
+                    Close
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Vodafone View */}
+            {supportView === 'vodafone' && (
+              <div className="mt-4 animate-fadeIn">
+                <div className="rounded-xl bg-[#141519] border border-[#24262d] p-4 text-left shadow-lg">
+                  <div className="flex items-center justify-between pb-3">
+                    <div className="flex items-center gap-2">
+                      <span className="w-5 h-6 rounded border border-red-500/80 bg-red-500/10 flex items-center justify-center">
+                        <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
+                      </span>
+                      <span className="text-sm font-semibold text-zinc-100">Vodafone Cash</span>
+                    </div>
+                    <button className="text-zinc-500 hover:text-zinc-300 p-0.5" onClick={() => setSupportView('main')}>
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24">
+                        <line x1="18" x2="6" y1="6" y2="18" />
+                        <line x1="6" x2="18" y1="6" y2="18" />
+                      </svg>
+                    </button>
+                  </div>
+                  <p className="text-xs text-zinc-400 mb-3">You can send your support to the following number:</p>
+                  <div className="w-full bg-[#1b1c22] rounded-xl py-3 px-4 border border-[#2c2f38] text-center mb-3">
+                    <span className="font-mono font-semibold tracking-wider text-sm text-zinc-100">+20 100 631 1537</span>
+                  </div>
+                  <button
+                    className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-[#191b20] border border-[#2c2f38] hover:bg-[#22242c] active:scale-[0.99] text-xs font-semibold text-zinc-200 hover:text-white transition-all shadow-sm"
+                    onClick={copyVodafoneNumber}
+                  >
+                    <svg className="w-4 h-4 text-zinc-400" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24">
+                      <rect height="13" rx="2" ry="2" width="13" x="9" y="9" />
+                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                    </svg>
+                    <span>{copied ? 'Copied!' : 'Copy Number'}</span>
+                  </button>
+                </div>
+                <div className="pt-4 flex justify-end">
+                  <button className="px-5 py-2 rounded-xl bg-[#0e56c8] hover:bg-[#1466ea] active:scale-[0.98] text-white text-xs font-semibold shadow-md transition-all" onClick={() => setSupportModal(false)}>
+                    Close
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
