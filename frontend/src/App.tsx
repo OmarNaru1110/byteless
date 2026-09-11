@@ -354,7 +354,7 @@ export default function App() {
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                       <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" strokeLinecap="round" strokeLinejoin="round" />
                     </svg>
-                    <span>Show in Finder</span>
+                    <span>Show in Folder</span>
                   </button>
                   <button
                     className="h-10 rounded-xl bg-subtle hover:bg-zinc-800 border border-border text-xs text-secondary hover:text-fg transition-all flex items-center justify-center gap-1.5"
