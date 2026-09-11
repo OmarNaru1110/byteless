@@ -13,3 +13,8 @@ func CalculateBitrate(videoSizeBytes int, durationSeconds int, audioBitrate int)
 	bitrate := (ConvertBytesToMB(videoSizeBytes)*8192)/durationSeconds - audioBitrate
 	return bitrate
 }
+
+func ApplyMargin(value int, marginPercent float64) int {
+	margin := float64(value) * (marginPercent / 100)
+	return int(float64(value) - margin)
+}
