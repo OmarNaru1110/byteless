@@ -4,9 +4,10 @@ import "log"
 
 type FfprobeOptions struct {
 	logLevel      string
-	showEntries   string
+	showEntries   []string
 	outputFormat  string
 	inputFilePath string
+	streams       string
 }
 
 type FfprobeBuilder struct {
@@ -30,7 +31,7 @@ func (b *FfprobeBuilder) SetLogLevel(logLevel string) *FfprobeBuilder {
 	return b
 }
 
-func (b *FfprobeBuilder) SetShowEntries(showEntries string) *FfprobeBuilder {
+func (b *FfprobeBuilder) SetShowEntries(showEntries []string) *FfprobeBuilder {
 	b.options.showEntries = showEntries
 	log.Printf("FfprobeBuilder: show entries set to %q", showEntries)
 	return b
@@ -48,20 +49,31 @@ func (b *FfprobeBuilder) SetInputFilePath(inputFilePath string) *FfprobeBuilder 
 	return b
 }
 
+func (b *FfprobeBuilder) SelectStreams(streams string) *FfprobeBuilder {
+	b.options.streams = streams
+	log.Printf("FfprobeBuilder: streams set to %q", streams)
+	return b
+}
+
 func (b *FfprobeBuilder) Build() []string {
 	args := []string{}
 	log.Printf("FfprobeBuilder: building args with options: %+v", b.options)
 	if b.options.logLevel != "" {
 		args = append(args, "-v", b.options.logLevel)
 	}
-	if b.options.showEntries != "" {
-		args = append(args, "-show_entries", b.options.showEntries)
+	if len(b.options.showEntries) > 0 {
+		for _, entry := range b.options.showEntries {
+			args = append(args, "-show_entries", entry)
+		}
 	}
 	if b.options.outputFormat != "" {
 		args = append(args, "-of", b.options.outputFormat)
 	}
 	if b.options.inputFilePath != "" {
 		args = append(args, b.options.inputFilePath)
+	}
+	if b.options.streams != "" {
+		args = append(args, "-select_streams", b.options.streams)
 	}
 	log.Printf("FfprobeBuilder: built args: %v", args)
 	return args
