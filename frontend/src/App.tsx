@@ -1,10 +1,15 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
+import { GetDefaultOutputDir, PickFolder, SelectVideoFile, LoadVideo } from '../wailsjs/go/main/App'
+import { OnFileDrop, BrowserOpenURL } from '../wailsjs/runtime'
+import { domain } from '../wailsjs/go/models'
 
 type Stage = 'upload' | 'config' | 'progress' | 'result'
 
 interface FileInfo {
   name: string
+  path: string
   rawSize: number
+  duration: number
   type: string
   preview?: string
 }
@@ -29,11 +34,12 @@ export default function App() {
   const [progress, setProgress] = useState(15)
   const [passTitle, setPassTitle] = useState('Pass 1 of 2: Analyzing bitrate...')
   const [supportModal, setSupportModal] = useState(false)
-  const [supportView, setSupportView] = useState<'main' | 'vodafone'>('main')
+  const [supportView, setSupportView] = useState<'main' | 'vodafone' | 'work'>('main')
   const [copied, setCopied] = useState(false)
   const [drag, setDrag] = useState(false)
-  const inputRef = useRef<HTMLInputElement>(null)
+  const [destination, setDestination] = useState('')
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const dropStageRef = useRef(stage)
 
   const originalSize = file ? file.rawSize : 320.4 * 1024 * 1024
   const originalMB = originalSize / (1024 * 1024)
@@ -44,23 +50,51 @@ export default function App() {
     : Math.max(0, ((originalMB - effectiveMB) / originalMB) * 100).toFixed(1)
   const isOverOriginal = !isNaN(rawTarget) && rawTarget >= originalMB
 
-  const loadFile = useCallback((f: File) => {
-    const info: FileInfo = { name: f.name, rawSize: f.size, type: f.type }
-    if (f.size < 15 * 1024 * 1024) {
-      info.preview = URL.createObjectURL(f)
+  const applyVideo = useCallback((info: domain.Video) => {
+    const f: FileInfo = {
+      name: info.name,
+      path: info.path,
+      rawSize: info.size,
+      duration: info.duration,
+      type: 'video',
     }
-    setFile(info)
+    setFile(f)
     setStage('config')
-    const mb = Math.max(1, Math.floor(f.size / (1024 * 1024) / 4))
+    GetDefaultOutputDir().then(setDestination).catch(() => {})
+    const mb = Math.max(1, Math.floor(info.size / (1024 * 1024) / 4))
     setTargetMB(mb)
     setTargetInput(String(mb))
   }, [])
 
-  const onDrop = (e: React.DragEvent) => {
-    e.preventDefault()
-    setDrag(false)
-    const f = e.dataTransfer.files[0]
-    if (f) loadFile(f)
+  const loadFromPath = useCallback(async (path: string) => {
+    applyVideo(await LoadVideo(path))
+  }, [applyVideo])
+
+  const openVideoPicker = useCallback(async () => {
+    const info = await SelectVideoFile()
+    if (info) applyVideo(info)
+  }, [applyVideo])
+
+  dropStageRef.current = stage
+
+  useEffect(() => {
+    const onDrop = (_x: number, _y: number, paths: string[]) => {
+      if (dropStageRef.current !== 'upload') return
+      const path = paths[0]
+      if (!path) return
+      setDrag(false)
+      loadFromPath(path).catch(() => {})
+    }
+    OnFileDrop(onDrop, true)
+  }, [loadFromPath])
+
+  const openFolderPicker = async () => {
+    let dir = destination
+    try {
+      dir = await GetDefaultOutputDir()
+    } catch { /* fall back to current destination */ }
+    const picked = await PickFolder(dir)
+    if (picked) setDestination(picked)
   }
 
   const startCompression = () => {
@@ -148,8 +182,8 @@ export default function App() {
               className={`group w-full h-80 rounded-2xl border border-dashed border-border hover:border-zinc-500 bg-card/40 hover:bg-card/90 transition-all duration-200 cursor-pointer flex flex-col items-center justify-center p-8 text-center relative overflow-hidden ${drag ? 'border-zinc-500 bg-card/90' : ''}`}
               onDragOver={e => { e.preventDefault(); setDrag(true) }}
               onDragLeave={() => setDrag(false)}
-              onDrop={onDrop}
-              onClick={() => inputRef.current?.click()}
+              onClick={openVideoPicker}
+              style={{ ['--wails-drop-target' as string]: 'drop' } as React.CSSProperties}
             >
               <div className={`w-14 h-14 rounded-2xl bg-subtle border border-border flex items-center justify-center mb-5 transition-all ${drag ? 'text-fg scale-105' : 'text-secondary group-hover:text-fg group-hover:scale-105'}`}>
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
@@ -161,7 +195,6 @@ export default function App() {
               <h2 className="text-base font-medium text-fg mb-1.5">{drag ? 'Drop to compress' : 'Drop video here or click to browse'}</h2>
               <p className="text-xs text-muted max-w-xs mb-5">Supports MP4, MOV, MKV, and WebM</p>
             </div>
-            <input ref={inputRef} type="file" accept="video/*" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) loadFile(f) }} />
           </div>
         )}
 
@@ -182,7 +215,7 @@ export default function App() {
                     <div className="text-xs text-muted font-mono mt-0.5 flex items-center gap-2">
                       <span>{fmt(file.rawSize)}</span>
                       <span>&#8226;</span>
-                      <span>{formatDuration(file.rawSize / (2 * 1024 * 1024))}</span>
+                      <span>{formatDuration(file.duration)}</span>
                     </div>
                   </div>
                 </div>
@@ -230,6 +263,28 @@ export default function App() {
                       <button className="text-muted hover:text-fg text-xs leading-none p-0.5 mt-1" onClick={() => setTargetMB(t => { const v = Math.max(t - 1, 1); setTargetInput(String(v)); return v })}>&#9660;</button>
                     </div>
                   </div>
+                </div>
+              </div>
+
+              {/* Destination Folder */}
+              <div className="space-y-3">
+                <label className="text-xs font-medium text-secondary uppercase tracking-wider">Destination Folder</label>
+                <div className="relative flex items-center">
+                  <div className="w-full bg-subtle border border-border focus-within:border-zinc-400 text-fg text-sm font-mono rounded-xl pl-4 pr-4 h-14 outline-none transition-colors flex items-center gap-3 overflow-hidden">
+                    <svg className="w-4 h-4 text-muted shrink-0" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" viewBox="0 0 24 24">
+                      <path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4.6a1.5 1.5 0 0 1 1.06.44L11.3 7.5h9.2A1.5 1.5 0 0 1 22 9v9a1.5 1.5 0 0 1-1.5 1.5h-16A1.5 1.5 0 0 1 3 18z" />
+                    </svg>
+                    <span className="flex-1 truncate">{destination || 'Choose a folder'}</span>
+                  </div>
+                  <button
+                    className="absolute right-2.5 shrink-0 h-9 px-3 rounded-lg text-xs font-medium bg-fg text-bg hover:bg-zinc-200 active:scale-[0.97] transition-all flex items-center gap-1.5"
+                    onClick={openFolderPicker}
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                    <span>Browse</span>
+                  </button>
                 </div>
               </div>
 
@@ -394,6 +449,15 @@ export default function App() {
             {/* Main View */}
             {supportView === 'main' && (
               <div className="mt-5 space-y-2.5">
+                {/* Looking for work */}
+                <button className="w-full flex items-center gap-3 px-3.5 py-3 rounded-xl bg-[#17181c] border border-[#262830] hover:bg-[#1f2127] text-left transition-colors group" onClick={() => setSupportView('work')}>
+                  <svg className="w-4 h-4 text-zinc-300 shrink-0" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24">
+                    <rect height="10" rx="2" ry="2" width="20" x="2" y="7" />
+                    <path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2" />
+                  </svg>
+                  <span className="text-[13px] font-medium text-zinc-200 group-hover:text-white">I'm looking for work — Hire me</span>
+                </button>
+
                 {/* Vodafone Cash */}
                 <button className="w-full flex items-center gap-3 px-3.5 py-3 rounded-xl bg-[#17181c] border border-[#262830] hover:bg-[#1f2127] text-left transition-colors group" onClick={() => setSupportView('vodafone')}>
                   <svg className="w-4 h-4 text-zinc-300 shrink-0" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24">
@@ -404,7 +468,7 @@ export default function App() {
                 </button>
 
                 {/* Ko-fi */}
-                <a className="w-full flex items-center gap-3 px-3.5 py-3 rounded-xl bg-[#17181c] border border-[#262830] hover:bg-[#1f2127] text-left transition-colors group" href="https://ko-fi.com" target="_blank" rel="noopener noreferrer">
+                <button className="w-full flex items-center gap-3 px-3.5 py-3 rounded-xl bg-[#17181c] border border-[#262830] hover:bg-[#1f2127] text-left transition-colors group" onClick={() => BrowserOpenURL('https://ko-fi.com')}>
                   <svg className="w-4 h-4 text-zinc-300 shrink-0" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24">
                     <path d="M17 8h1a4 4 0 1 1 0 8h-1" />
                     <path d="M3 8h14v9a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4Z" />
@@ -413,23 +477,15 @@ export default function App() {
                     <line x1="14" x2="14" y1="2" y2="4" />
                   </svg>
                   <span className="text-[13px] font-medium text-zinc-200 group-hover:text-white">Support me on Ko-fi</span>
-                </a>
-
-                {/* Follow GitHub */}
-                <a className="w-full flex items-center gap-3 px-3.5 py-3 rounded-xl bg-[#17181c] border border-[#262830] hover:bg-[#1f2127] text-left transition-colors group" href="https://github.com" target="_blank" rel="noopener noreferrer">
-                  <svg className="w-4 h-4 text-zinc-300 shrink-0" fill="currentColor" viewBox="0 0 24 24">
-                    <path clipRule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2Z" fillRule="evenodd" />
-                  </svg>
-                  <span className="text-[13px] font-medium text-zinc-200 group-hover:text-white">Follow me on GitHub</span>
-                </a>
+                </button>
 
                 {/* Star GitHub */}
-                <a className="w-full flex items-center gap-3 px-3.5 py-3 rounded-xl bg-[#17181c] border border-[#262830] hover:bg-[#1f2127] text-left transition-colors group" href="https://github.com" target="_blank" rel="noopener noreferrer">
+                <button className="w-full flex items-center gap-3 px-3.5 py-3 rounded-xl bg-[#17181c] border border-[#262830] hover:bg-[#1f2127] text-left transition-colors group" onClick={() => BrowserOpenURL('https://github.com/OmarNaru1110/byteless')}>
                   <svg className="w-4 h-4 text-zinc-300 shrink-0" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24">
                     <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
                   </svg>
                   <span className="text-[13px] font-medium text-zinc-200 group-hover:text-white">Star/Contribute to byteless on GitHub</span>
-                </a>
+                </button>
 
                 <div className="pt-4 flex justify-end">
                   <button className="px-5 py-2 rounded-xl bg-[#0e56c8] hover:bg-[#1466ea] active:scale-[0.98] text-white text-xs font-semibold shadow-md transition-all" onClick={() => setSupportModal(false)}>
@@ -471,6 +527,59 @@ export default function App() {
                     </svg>
                     <span>{copied ? 'Copied!' : 'Copy Number'}</span>
                   </button>
+                </div>
+                <div className="pt-4 flex justify-end">
+                  <button className="px-5 py-2 rounded-xl bg-[#0e56c8] hover:bg-[#1466ea] active:scale-[0.98] text-white text-xs font-semibold shadow-md transition-all" onClick={() => setSupportModal(false)}>
+                    Close
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Work View */}
+            {supportView === 'work' && (
+              <div className="mt-4 animate-fadeIn">
+                <div className="rounded-xl bg-[#141519] border border-[#24262d] p-4 text-left shadow-lg">
+                  <div className="flex items-center justify-between pb-3">
+                    <div className="flex items-center gap-2">
+                      <span className="w-5 h-6 rounded border border-green-500/80 bg-green-500/10 flex items-center justify-center">
+                        <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
+                      </span>
+                      <span className="text-sm font-semibold text-zinc-100">Looking for work</span>
+                    </div>
+                    <button className="text-zinc-500 hover:text-zinc-300 p-0.5" onClick={() => setSupportView('main')}>
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24">
+                        <line x1="18" x2="6" y1="6" y2="18" />
+                        <line x1="6" x2="18" y1="6" y2="18" />
+                      </svg>
+                    </button>
+                  </div>
+                  <p className="text-xs text-zinc-400 mb-3">I'm a junior software engineer looking for work. If your team or company needs someone, I'd love to hear from you:</p>
+                  <div className="space-y-2.5">
+                    <button className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl bg-[#1b1c22] border border-[#2c2f38] hover:bg-[#22242c] text-left transition-all group" onClick={() => BrowserOpenURL('https://omarnaru.online/')}>
+                      <svg className="w-4 h-4 text-zinc-400 shrink-0" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24">
+                        <circle cx="12" cy="12" r="10" />
+                        <line x1="2" x2="22" y1="12" y2="12" />
+                        <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+                      </svg>
+                      <span className="text-[13px] font-medium text-zinc-200 group-hover:text-white">omarnaru.online</span>
+                    </button>
+                    <button className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl bg-[#1b1c22] border border-[#2c2f38] hover:bg-[#22242c] text-left transition-all group" onClick={() => BrowserOpenURL('mailto:omarnaru2002@gmail.com')}>
+                      <svg className="w-4 h-4 text-zinc-400 shrink-0" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24">
+                        <rect height="16" rx="2" ry="2" width="20" x="2" y="4" />
+                        <path d="m22 7-10 5L2 7" />
+                      </svg>
+                      <span className="text-[13px] font-medium text-zinc-200 group-hover:text-white">omarnaru2002@gmail.com</span>
+                    </button>
+                    <button className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl bg-[#1b1c22] border border-[#2c2f38] hover:bg-[#22242c] text-left transition-all group" onClick={() => BrowserOpenURL('https://www.linkedin.com/in/omarnaru/')}>
+                      <svg className="w-4 h-4 text-zinc-400 shrink-0" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24">
+                        <path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z" />
+                        <rect height="12" width="4" x="2" y="9" />
+                        <circle cx="4" cy="4" r="2" />
+                      </svg>
+                      <span className="text-[13px] font-medium text-zinc-200 group-hover:text-white">linkedin.com/in/omarnaru</span>
+                    </button>
+                  </div>
                 </div>
                 <div className="pt-4 flex justify-end">
                   <button className="px-5 py-2 rounded-xl bg-[#0e56c8] hover:bg-[#1466ea] active:scale-[0.98] text-white text-xs font-semibold shadow-md transition-all" onClick={() => setSupportModal(false)}>
