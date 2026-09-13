@@ -1,5 +1,10 @@
 package util
 
+import (
+	"fmt"
+	"time"
+)
+
 func ConvertMBToBytes(mb int) int {
 	return mb * 1024 * 1024
 }
@@ -17,4 +22,8 @@ func CalculateBitrate(videoSizeBytes int, durationSeconds int, audioBitrate int)
 func ApplyMargin(value int, marginPercent float64) int {
 	margin := float64(value) * (marginPercent / 100)
 	return int(float64(value) - margin)
+}
+
+func GenerateName(extension string) string {
+	return fmt.Sprintf("byteless_%d.%s", time.Now().Unix(), extension)
 }
