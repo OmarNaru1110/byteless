@@ -94,12 +94,6 @@ func (b *FfmpegBuilder) Build() []string {
 		args = append(args, "-i", b.options.inputFilePath)
 	}
 
-	if b.options.outputFilePath != "" {
-		args = append(args, b.options.outputFilePath)
-	} else {
-		args = append(args, "NUL")
-	}
-
 	if b.options.videoCodec != "" {
 		args = append(args, "-c:v", b.options.videoCodec)
 	}
@@ -126,6 +120,12 @@ func (b *FfmpegBuilder) Build() []string {
 
 	if b.options.format != "" {
 		args = append(args, "-f", b.options.format)
+	}
+
+	if b.options.outputFilePath != "" {
+		args = append(args, b.options.outputFilePath)
+	} else {
+		args = append(args, "NUL")
 	}
 
 	log.Printf("FfmpegBuilder: built args: %v", args)
