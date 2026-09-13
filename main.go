@@ -20,6 +20,9 @@ func main() {
 		Title:  "byteless",
 		Width:  520,
 		Height: 580,
+		DragAndDrop: &options.DragAndDrop{
+			EnableFileDrop: true,
+		},
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},
