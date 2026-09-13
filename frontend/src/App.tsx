@@ -3,7 +3,7 @@ import { GetDefaultOutputDir, PickFolder, SelectVideoFile, LoadVideo } from '../
 import { OnFileDrop, BrowserOpenURL } from '../wailsjs/runtime'
 import { domain } from '../wailsjs/go/models'
 
-type Stage = 'upload' | 'config' | 'progress' | 'result'
+type Stage = 'upload' | 'loading' | 'config' | 'progress' | 'result'
 
 interface FileInfo {
   name: string
@@ -39,6 +39,7 @@ export default function App() {
   const [drag, setDrag] = useState(false)
   const [destination, setDestination] = useState('')
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const loadingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const dropStageRef = useRef(stage)
 
   const originalSize = file ? file.rawSize : 320.4 * 1024 * 1024
@@ -59,15 +60,22 @@ export default function App() {
       type: 'video',
     }
     setFile(f)
-    setStage('config')
+    setStage('loading')
     GetDefaultOutputDir().then(setDestination).catch(() => {})
     const mb = Math.max(1, Math.floor(info.size / (1024 * 1024) / 4))
     setTargetMB(mb)
     setTargetInput(String(mb))
+    if (loadingTimerRef.current) clearTimeout(loadingTimerRef.current)
+    loadingTimerRef.current = setTimeout(() => setStage('config'), 700)
   }, [])
 
   const loadFromPath = useCallback(async (path: string) => {
-    applyVideo(await LoadVideo(path))
+    setStage('loading')
+    try {
+      applyVideo(await LoadVideo(path))
+    } catch {
+      setStage('upload')
+    }
   }, [applyVideo])
 
   const openVideoPicker = useCallback(async () => {
@@ -141,7 +149,10 @@ export default function App() {
     })
   }
 
-  useEffect(() => () => { if (timerRef.current) clearInterval(timerRef.current) }, [])
+  useEffect(() => () => {
+    if (timerRef.current) clearInterval(timerRef.current)
+    if (loadingTimerRef.current) clearTimeout(loadingTimerRef.current)
+  }, [])
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setSupportModal(false)
@@ -194,6 +205,36 @@ export default function App() {
               </div>
               <h2 className="text-base font-medium text-fg mb-1.5">{drag ? 'Drop to compress' : 'Drop video here or click to browse'}</h2>
               <p className="text-xs text-muted max-w-xs mb-5">Supports MP4, MOV, MKV, and WebM</p>
+            </div>
+          </div>
+        )}
+
+        {/* Stage: Loading */}
+        {stage === 'loading' && (
+          <div className="w-full flex-col animate-fadeIn flex">
+            <div className="w-full rounded-2xl border border-border bg-card p-10 shadow-xl flex flex-col items-center text-center space-y-6">
+              <div className="relative w-20 h-20">
+                <svg className="w-full h-full animate-spin" viewBox="0 0 100 100">
+                  <circle className="text-subtle" cx="50" cy="50" fill="transparent" r="42" stroke="currentColor" strokeWidth="6" />
+                  <circle
+                    className="text-fg"
+                    cx="50" cy="50" fill="transparent" r="42"
+                    stroke="currentColor"
+                    strokeDasharray="150"
+                    strokeDashoffset="35"
+                    strokeLinecap="round" strokeWidth="6"
+                  />
+                </svg>
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <svg className="w-7 h-7 text-fg" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
+                    <path d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </div>
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-sm font-medium text-fg">Loading video&hellip;</h3>
+                <p className="text-xs text-muted font-mono truncate max-w-sm">{file?.name || 'Reading file details'}</p>
+              </div>
             </div>
           </div>
         )}
