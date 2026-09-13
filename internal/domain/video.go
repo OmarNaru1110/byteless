@@ -1,9 +1,9 @@
 package domain
 
 type Video struct {
-	Path         string
-	Name         string
-	Size         int // bytes
-	Duration     int // seconds
-	AudioBitrate int // kbps
+	Path         string `json:"path"`
+	Name         string `json:"name"`
+	Size         int    `json:"size"`         // bytes
+	Duration     int    `json:"duration"`     // seconds
+	AudioBitrate int    `json:"audioBitrate"` // kbps
 }
