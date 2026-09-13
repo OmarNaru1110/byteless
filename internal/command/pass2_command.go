@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/OmarNaru1110/byteless/internal/builder"
+	"github.com/OmarNaru1110/byteless/internal/util"
 )
 
 type TwoPassEncodePass2Command struct {
@@ -55,14 +56,14 @@ func (c *TwoPassEncodePass2Command) Execute() error {
 
 		if totalSeconds == 0 {
 			if m := durationRe.FindStringSubmatch(line); m != nil {
-				totalSeconds = parseTimeToSeconds(m[1], m[2], m[3], m[4])
+				totalSeconds = util.ParseTimeToSeconds(m[1], m[2], m[3], m[4])
 				log.Printf("TwoPassEncodePass2Command: detected duration %.2fs", totalSeconds)
 			}
 		}
 
 		if strings.Contains(line, "time=") {
 			if m := timeRe.FindStringSubmatch(line); m != nil {
-				currentSeconds := parseTimeToSeconds(m[1], m[2], m[3], m[4])
+				currentSeconds := util.ParseTimeToSeconds(m[1], m[2], m[3], m[4])
 				if totalSeconds > 0 {
 					pct := (currentSeconds / totalSeconds) * 100
 					fmt.Printf("\r[%6.1f%%] %s", pct, strings.TrimSpace(line))

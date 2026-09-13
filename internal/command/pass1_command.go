@@ -6,10 +6,10 @@ import (
 	"log"
 	"os/exec"
 	"regexp"
-	"strconv"
 	"strings"
 
 	"github.com/OmarNaru1110/byteless/internal/builder"
+	"github.com/OmarNaru1110/byteless/internal/util"
 )
 
 type TwoPassEncodePass1Command struct {
@@ -24,14 +24,6 @@ func NewTwoPassEncodePass1Command() *TwoPassEncodePass1Command {
 
 var durationRe = regexp.MustCompile(`Duration:\s*(\d{2}):(\d{2}):(\d{2})\.(\d{2})`)
 var timeRe = regexp.MustCompile(`time=\s*(\d{2}):(\d{2}):(\d{2})\.(\d{2})`)
-
-func parseTimeToSeconds(h, m, s, cs string) float64 {
-	hours, _ := strconv.ParseFloat(h, 64)
-	minutes, _ := strconv.ParseFloat(m, 64)
-	seconds, _ := strconv.ParseFloat(s, 64)
-	centiseconds, _ := strconv.ParseFloat(cs, 64)
-	return hours*3600 + minutes*60 + seconds + centiseconds/100
-}
 
 func (c *TwoPassEncodePass1Command) Execute() error {
 	if c.builder == nil {
@@ -68,14 +60,14 @@ func (c *TwoPassEncodePass1Command) Execute() error {
 
 		if totalSeconds == 0 {
 			if m := durationRe.FindStringSubmatch(line); m != nil {
-				totalSeconds = parseTimeToSeconds(m[1], m[2], m[3], m[4])
+				totalSeconds = util.ParseTimeToSeconds(m[1], m[2], m[3], m[4])
 				log.Printf("TwoPassEncodePass1Command: detected duration %.2fs", totalSeconds)
 			}
 		}
 
 		if strings.Contains(line, "time=") {
 			if m := timeRe.FindStringSubmatch(line); m != nil {
-				currentSeconds := parseTimeToSeconds(m[1], m[2], m[3], m[4])
+				currentSeconds := util.ParseTimeToSeconds(m[1], m[2], m[3], m[4])
 				if totalSeconds > 0 {
 					pct := (currentSeconds / totalSeconds) * 100
 					fmt.Printf("\r[%6.1f%%] %s", pct, strings.TrimSpace(line))
