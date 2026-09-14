@@ -17,3 +17,7 @@ export function PickFolder(arg1) {
 export function SelectVideoFile() {
   return window['go']['main']['App']['SelectVideoFile']();
 }
+
+export function ShowInFolder(arg1) {
+  return window['go']['main']['App']['ShowInFolder'](arg1);
+}

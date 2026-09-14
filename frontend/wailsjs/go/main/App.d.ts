@@ -9,3 +9,5 @@ export function LoadVideo(arg1:string):Promise<domain.Video>;
 export function PickFolder(arg1:string):Promise<string>;
 
 export function SelectVideoFile():Promise<domain.Video>;
+
+export function ShowInFolder(arg1:string):Promise<void>;
