@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/OmarNaru1110/byteless/internal/builder"
+	"github.com/OmarNaru1110/byteless/internal/domain"
 	"github.com/OmarNaru1110/byteless/internal/util"
 )
 
@@ -16,11 +17,11 @@ type TwoPassEncodePass1Command struct {
 	builder *builder.FfmpegBuilder
 }
 
-func NewTwoPassEncodePass1Command(inputPath string, targetVideoBitrateKbps int) *TwoPassEncodePass1Command {
+func NewTwoPassEncodePass1Command(inputPath string, targetVideoBitrateKbps int, encoder domain.VideoEncoder) *TwoPassEncodePass1Command {
 	return &TwoPassEncodePass1Command{
 		builder: builder.NewFfmpegBuilder("ffmpeg").
 			SetInputFilePath(inputPath).
-			SetVideoCodec("libx264").
+			SetVideoCodec(string(encoder)).
 			SetVideoBitrate(fmt.Sprintf("%dk", targetVideoBitrateKbps)).
 			SetPass(1).
 			DisableAudio().
