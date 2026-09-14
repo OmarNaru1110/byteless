@@ -197,3 +197,30 @@ func (a *App) ShowInFolder(path string) error {
 	}
 	return cmd.Run()
 }
+
+func (a *App) OpenFile(path string) error {
+	log.Printf("App: OpenFile called with %q", path)
+
+	var cmd *exec.Cmd
+	switch goRuntime.GOOS {
+	case "windows":
+		info, err := os.Stat(path)
+		if err != nil {
+			log.Printf("App: OpenFile stat failed for %q: %v", path, err)
+			return err
+		}
+		if info.IsDir() {
+			cmd = exec.Command("explorer", path)
+		} else {
+			cmd = exec.Command("cmd", "/C", "start", "", path)
+		}
+	case "darwin":
+		cmd = exec.Command("open", path)
+	case "linux":
+		cmd = exec.Command("xdg-open", path)
+	default:
+		log.Printf("App: OpenFile unsupported OS %q", goRuntime.GOOS)
+		return fmt.Errorf("unsupported OS: %s", goRuntime.GOOS)
+	}
+	return cmd.Run()
+}

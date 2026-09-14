@@ -18,6 +18,10 @@ export function SelectVideoFile() {
   return window['go']['main']['App']['SelectVideoFile']();
 }
 
+export function OpenFile(arg1) {
+  return window['go']['main']['App']['OpenFile'](arg1);
+}
+
 export function ShowInFolder(arg1) {
   return window['go']['main']['App']['ShowInFolder'](arg1);
 }

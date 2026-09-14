@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { GetDefaultOutputDir, PickFolder, SelectVideoFile, LoadVideo, ShowInFolder } from '../wailsjs/go/main/App'
+import { GetDefaultOutputDir, PickFolder, SelectVideoFile, LoadVideo, OpenFile, ShowInFolder } from '../wailsjs/go/main/App'
 import { OnFileDrop, BrowserOpenURL } from '../wailsjs/runtime'
 import { domain } from '../wailsjs/go/models'
 
@@ -439,7 +439,10 @@ export default function App() {
 
               {/* Actions */}
               <div className="space-y-2 pt-1">
-                <button className="w-full h-11 rounded-xl bg-fg text-bg font-medium text-xs hover:bg-zinc-200 transition-all flex items-center justify-center gap-1.5">
+                <button
+                  className="w-full h-11 rounded-xl bg-fg text-bg font-medium text-xs hover:bg-zinc-200 transition-all flex items-center justify-center gap-1.5"
+                  onClick={() => OpenFile(`${destination}/${file?.name}`).catch(() => {})}
+                >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                     <path d="M5 3l14 9-14 9V3z" fill="currentColor" />
                   </svg>
