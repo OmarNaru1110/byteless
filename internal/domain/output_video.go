@@ -3,11 +3,12 @@ package domain
 import "path/filepath"
 
 type OutputVideo struct {
-	TargetSize            int // bytes
-	TargetSizeAfterMargin int // bytes
-	OutputPath            string
-	OutputName            string
-	ElapsedTime           int // seconds
+	TargetSize            int    `json:"targetSize"`            // bytes
+	TargetSizeAfterMargin int    `json:"targetSizeAfterMargin"` // bytes
+	OutputPath            string `json:"outputPath"`
+	OutputName            string `json:"outputName"`
+	Size                  int    `json:"size"`       // bytes
+	ElapsedTime           int    `json:"elapsedTime"` // seconds
 }
 
 func (v OutputVideo) FullPath() string {
