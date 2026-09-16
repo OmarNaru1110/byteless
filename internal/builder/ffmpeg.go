@@ -15,6 +15,7 @@ type ffmpegOptions struct {
 	audioBitrate   string
 	disableAudio   bool
 	format         string
+	progressPipe   string
 }
 
 type FfmpegBuilder struct {
@@ -86,6 +87,12 @@ func (b *FfmpegBuilder) SetFormat(format string) *FfmpegBuilder {
 	return b
 }
 
+func (b *FfmpegBuilder) SetProgressPipe(progressPipe string) *FfmpegBuilder {
+	b.options.progressPipe = progressPipe
+	log.Printf("FfmpegBuilder: progress pipe set to %q", progressPipe)
+	return b
+}
+
 func (b *FfmpegBuilder) Build() []string {
 	var args []string
 	log.Printf("FfmpegBuilder: building args with options: %+v", b.options)
@@ -120,6 +127,10 @@ func (b *FfmpegBuilder) Build() []string {
 
 	if b.options.format != "" {
 		args = append(args, "-f", b.options.format)
+	}
+
+	if b.options.progressPipe != "" {
+		args = append(args, "-progress", b.options.progressPipe)
 	}
 
 	if b.options.outputFilePath != "" {

@@ -25,7 +25,8 @@ func NewTwoPassEncodePass1Command(inputPath string, targetVideoBitrateKbps int, 
 			SetVideoBitrate(fmt.Sprintf("%dk", targetVideoBitrateKbps)).
 			SetPass(1).
 			DisableAudio().
-			SetFormat("null"),
+			SetFormat("null").
+			SetProgressPipe("pipe:1"),
 	}
 }
 

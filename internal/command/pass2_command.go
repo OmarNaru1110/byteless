@@ -25,6 +25,7 @@ func NewTwoPassEncodePass2Command(inputPath string, targetVideoBitrateKbps int, 
 			SetPass(2).
 			SetAudioCodec("aac").
 			SetAudioBitrate("128k").
+			SetProgressPipe("pipe:1").
 			SetOutputFilePath(outputFilePath),
 	}
 }
