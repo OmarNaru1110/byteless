@@ -36,3 +36,7 @@ func ParseTimeToSeconds(h, m, s, cs string) float64 {
 	centiseconds, _ := strconv.ParseFloat(cs, 64)
 	return hours*3600 + minutes*60 + seconds + centiseconds/100
 }
+
+func ConvertMicrosecondsToSeconds(microseconds int64) float64 {
+	return float64(microseconds) / 1_000_000
+}
