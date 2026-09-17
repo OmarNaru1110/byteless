@@ -2,3 +2,5 @@ build/bin
 node_modules
 frontend/dist
 .vscode
+*.log
+*.log.*
