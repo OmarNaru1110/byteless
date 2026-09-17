@@ -2,14 +2,17 @@ package command
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"log"
 	"os/exec"
+	"strconv"
 	"strings"
 
 	"github.com/OmarNaru1110/byteless/internal/builder"
 	"github.com/OmarNaru1110/byteless/internal/domain"
 	"github.com/OmarNaru1110/byteless/internal/util"
+	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 type TwoPassEncodePass2Command struct {
@@ -18,7 +21,7 @@ type TwoPassEncodePass2Command struct {
 
 func NewTwoPassEncodePass2Command(inputPath string, targetVideoBitrateKbps int, outputFilePath string, encoder domain.VideoEncoder) *TwoPassEncodePass2Command {
 	return &TwoPassEncodePass2Command{
-		builder: builder.NewFfmpegBuilder("ffmpeg").
+		builder: builder.NewFfmpegBuilder("D:\\Computer Science\\Projects\\byteless\\build\\bin\\ffmpeg.exe").
 			SetInputFilePath(inputPath).
 			SetVideoCodec(string(encoder)).
 			SetVideoBitrate(fmt.Sprintf("%dk", targetVideoBitrateKbps)).
@@ -30,7 +33,7 @@ func NewTwoPassEncodePass2Command(inputPath string, targetVideoBitrateKbps int, 
 	}
 }
 
-func (c *TwoPassEncodePass2Command) Execute() error {
+func (c *TwoPassEncodePass2Command) Execute(ctx context.Context, totalSeconds int) error {
 	if c.builder == nil {
 		err := fmt.Errorf("FfmpegBuilder is nil")
 		log.Printf("TwoPassEncodePass2Command: Builder validation failed: %v", err)
@@ -47,39 +50,33 @@ func (c *TwoPassEncodePass2Command) Execute() error {
 
 	log.Printf("TwoPassEncodePass2Command: executing %s %s", ffmpegPath, strings.Join(cmdArgs, " "))
 
-	cmd := exec.Command(ffmpegPath, cmdArgs...)
+	cmd := exec.CommandContext(ctx, ffmpegPath, cmdArgs...)
 
-	stderr, err := cmd.StderrPipe()
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return fmt.Errorf("TwoPassEncodePass2Command: failed to create stderr pipe: %w", err)
+		return fmt.Errorf("TwoPassEncodePass2Command: failed to create stdout pipe: %w", err)
 	}
 
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("TwoPassEncodePass2Command: failed to start ffmpeg: %w", err)
 	}
 
-	var totalSeconds float64
-	scanner := bufio.NewScanner(stderr)
+	scanner := bufio.NewScanner(stdout)
 	for scanner.Scan() {
 		line := scanner.Text()
-
-		if totalSeconds == 0 {
-			if m := durationRe.FindStringSubmatch(line); m != nil {
-				totalSeconds = util.ParseTimeToSeconds(m[1], m[2], m[3], m[4])
-				log.Printf("TwoPassEncodePass2Command: detected duration %.2fs", totalSeconds)
+		if strings.Contains(line, "out_time_us=") {
+			timeStr := strings.TrimPrefix(line, "out_time_us=")
+			timeUs, err := strconv.Atoi(timeStr)
+			if err != nil {
+				log.Printf("TwoPassEncodePass2Command: failed to parse out_time_us: %v", err)
+				continue
 			}
-		}
 
-		if strings.Contains(line, "time=") {
-			if m := timeRe.FindStringSubmatch(line); m != nil {
-				currentSeconds := util.ParseTimeToSeconds(m[1], m[2], m[3], m[4])
-				if totalSeconds > 0 {
-					pct := (currentSeconds / totalSeconds) * 100
-					fmt.Printf("\r[%6.1f%%] %s", pct, strings.TrimSpace(line))
-				} else {
-					fmt.Printf("\r%s", strings.TrimSpace(line))
-				}
-			}
+			timeSeconds := util.ConvertMicrosecondsToSeconds(int64(timeUs))
+			percent := float64(timeSeconds) / float64(totalSeconds) * 100
+			fmt.Printf("\rTwoPassEncodePass2Command: encoding progress: %.2f%%", percent)
+
+			runtime.EventsEmit(ctx, "pass2Progress", fmt.Sprintf("%.0f", percent))
 		}
 	}
 
