@@ -18,8 +18,8 @@ func main() {
 	// Create application with options
 	err := wails.Run(&options.App{
 		Title:  "byteless",
-		Width:  520,
-		Height: 580,
+		Width:  580,
+		Height: 720,
 		DragAndDrop: &options.DragAndDrop{
 			EnableFileDrop: true,
 		},
