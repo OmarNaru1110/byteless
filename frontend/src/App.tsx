@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { GetDefaultOutputDir, PickFolder, SelectVideoFile, LoadVideo, OpenFile, ShowInFolder } from '../wailsjs/go/main/App'
-import { OnFileDrop, BrowserOpenURL } from '../wailsjs/runtime'
+import { GetDefaultOutputDir, PickFolder, SelectVideoFile, LoadVideo, OpenFile, ShowInFolder, CompressVideo, GetEncoders, GetMinPossibleSize, CancelCompression } from '../wailsjs/go/main/App'
+import { OnFileDrop, BrowserOpenURL, EventsOn } from '../wailsjs/runtime'
 import { domain } from '../wailsjs/go/models'
 
 type Stage = 'upload' | 'loading' | 'config' | 'progress' | 'result'
@@ -26,11 +26,23 @@ function formatDuration(seconds: number): string {
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
 }
 
+function fmtMB(mb: number): string {
+  if (mb === 0) return '0'
+  if (mb >= 100) return mb.toFixed(0)
+  if (mb >= 10) return mb.toFixed(1)
+  return mb.toFixed(2)
+}
+
+function baseName(path: string): string {
+  return path.split(/[\\/]/).pop() || path
+}
+
 export default function App() {
   const [stage, setStage] = useState<Stage>('upload')
   const [file, setFile] = useState<FileInfo | null>(null)
   const [targetMB, setTargetMB] = useState(1)
   const [targetInput, setTargetInput] = useState('1')
+  const [minMB, setMinMB] = useState(1)
   const [progress, setProgress] = useState(15)
   const [passTitle, setPassTitle] = useState('Pass 1 of 2: Analyzing bitrate...')
   const [supportModal, setSupportModal] = useState(false)
@@ -38,18 +50,23 @@ export default function App() {
   const [copied, setCopied] = useState(false)
   const [drag, setDrag] = useState(false)
   const [destination, setDestination] = useState('')
+  const [outputPath, setOutputPath] = useState('')
+  const [encoders, setEncoders] = useState<domain.EncoderInfo[]>([])
+  const [encoderId, setEncoderId] = useState('')
+  const [compressError, setCompressError] = useState('')
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const loadingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const dropStageRef = useRef(stage)
 
   const originalSize = file ? file.rawSize : 320.4 * 1024 * 1024
   const originalMB = originalSize / (1024 * 1024)
-  const rawTarget = parseInt(targetInput)
-  const effectiveMB = !isNaN(rawTarget) && rawTarget >= 1 ? rawTarget : targetMB
+  const rawTarget = parseFloat(targetInput)
+  const effectiveMB = !isNaN(rawTarget) && rawTarget >= minMB ? rawTarget : targetMB
   const reductionPct = effectiveMB >= originalMB
     ? '0.0'
     : Math.max(0, ((originalMB - effectiveMB) / originalMB) * 100).toFixed(1)
   const isOverOriginal = !isNaN(rawTarget) && rawTarget >= originalMB
+  const selectedEncoderName = encoders.find((e) => e.id === encoderId)?.name || ''
 
   const applyVideo = useCallback((info: domain.Video) => {
     const f: FileInfo = {
@@ -62,9 +79,14 @@ export default function App() {
     setFile(f)
     setStage('loading')
     GetDefaultOutputDir().then(setDestination).catch(() => {})
-    const mb = Math.max(1, Math.floor(info.size / (1024 * 1024) / 4))
-    setTargetMB(mb)
-    setTargetInput(String(mb))
+    GetMinPossibleSize()
+      .then((min) => {
+        const floor = Math.max(1, min)
+        setMinMB(floor)
+        setTargetMB(floor)
+        setTargetInput(String(floor))
+      })
+      .catch(() => {})
     if (loadingTimerRef.current) clearTimeout(loadingTimerRef.current)
     loadingTimerRef.current = setTimeout(() => setStage('config'), 700)
   }, [])
@@ -96,6 +118,17 @@ export default function App() {
     OnFileDrop(onDrop, true)
   }, [loadFromPath])
 
+  useEffect(() => {
+    GetEncoders()
+      .then((list) => {
+        if (list.length > 0) {
+          setEncoders(list)
+          setEncoderId(list[0].id)
+        }
+      })
+      .catch(() => {})
+  }, [])
+
   const openFolderPicker = async () => {
     let dir = destination
     try {
@@ -105,33 +138,38 @@ export default function App() {
     if (picked) setDestination(picked)
   }
 
-  const startCompression = () => {
+  const startCompression = async () => {
+    if (!encoderId) return
+    setCompressError('')
     setStage('progress')
     setProgress(0)
     setPassTitle('Pass 1 of 2: Analyzing bitrate...')
 
-    let pass = 1
-    let p = 0
-    timerRef.current = setInterval(() => {
-      p += 2
-      if (p >= 100) {
-        if (pass === 1) {
-          pass = 2
-          p = 0
-          setProgress(0)
-          setPassTitle('Pass 2 of 2: Compressing video...')
-        } else {
-          clearInterval(timerRef.current!)
-          setStage('result')
-        }
-        return
-      }
-      setProgress(p)
-    }, 80)
+    const offPass1 = EventsOn('pass1Progress', (p: number) => {
+      setPassTitle('Pass 1 of 2: Analyzing bitrate...')
+      setProgress(Math.min(100, Math.max(0, p)))
+    })
+    const offPass2 = EventsOn('pass2Progress', (p: number) => {
+      setPassTitle('Pass 2 of 2: Compressing video...')
+      setProgress(Math.min(100, Math.max(0, p)))
+    })
+
+    try {
+      const result = await CompressVideo(effectiveMB, destination, encoderId)
+      setOutputPath(result)
+      offPass1()
+      offPass2()
+      setStage('result')
+    } catch (err) {
+      offPass1()
+      offPass2()
+      setStage('config')
+      setCompressError(err instanceof Error ? err.message : String(err))
+    }
   }
 
   const cancelCompression = () => {
-    if (timerRef.current) clearInterval(timerRef.current)
+    CancelCompression()
     setStage('config')
   }
 
@@ -140,6 +178,7 @@ export default function App() {
     setStage('upload')
     setFile(null)
     setProgress(15)
+    setOutputPath('')
   }
 
   const copyVodafoneNumber = () => {
@@ -204,7 +243,6 @@ export default function App() {
                 </svg>
               </div>
               <h2 className="text-base font-medium text-fg mb-1.5">{drag ? 'Drop to compress' : 'Drop video here or click to browse'}</h2>
-              <p className="text-xs text-muted max-w-xs mb-5">Supports MP4, MOV, MKV, and WebM</p>
             </div>
           </div>
         )}
@@ -279,18 +317,18 @@ export default function App() {
                     pattern="[0-9]*"
                     value={targetInput}
                     onChange={e => {
-                      const raw = e.target.value.replace(/[^0-9]/g, '')
+                      const raw = e.target.value.replace(/[^0-9.]/g, '')
                       setTargetInput(raw)
-                      const v = parseInt(raw)
-                      if (!isNaN(v) && v >= 1) {
+                      const v = parseFloat(raw)
+                      if (!isNaN(v) && v >= minMB) {
                         setTargetMB(v)
                       }
                     }}
                     onBlur={() => {
-                      const v = parseInt(targetInput)
-                      if (isNaN(v) || v < 1) {
-                        setTargetMB(1)
-                        setTargetInput('1')
+                      const v = parseFloat(targetInput)
+                      if (isNaN(v) || v < minMB) {
+                        setTargetMB(minMB)
+                        setTargetInput(String(minMB))
                       } else {
                         setTargetMB(v)
                         setTargetInput(String(v))
@@ -301,10 +339,11 @@ export default function App() {
                     <span className="text-sm font-mono text-muted font-medium pointer-events-none">MB</span>
                     <div className="flex flex-col border-l border-border pl-3">
                       <button className="text-muted hover:text-fg text-xs leading-none p-0.5" onClick={() => setTargetMB(t => { const v = t + 1; setTargetInput(String(v)); return v })}>&#9650;</button>
-                      <button className="text-muted hover:text-fg text-xs leading-none p-0.5 mt-1" onClick={() => setTargetMB(t => { const v = Math.max(t - 1, 1); setTargetInput(String(v)); return v })}>&#9660;</button>
+                      <button className="text-muted hover:text-fg text-xs leading-none p-0.5 mt-1" onClick={() => setTargetMB(t => { const v = Math.max(t - 1, minMB); setTargetInput(String(v)); return v })}>&#9660;</button>
                     </div>
                   </div>
                 </div>
+                <p className="text-xs text-muted font-mono">Minimum possible: {fmtMB(minMB)} MB</p>
               </div>
 
               {/* Destination Folder */}
@@ -329,6 +368,38 @@ export default function App() {
                 </div>
               </div>
 
+              {/* Encoder */}
+              <div className="space-y-3">
+                <label className="text-xs font-medium text-secondary uppercase tracking-wider">Encoder</label>
+                <div className="grid grid-cols-1 gap-2">
+                  {encoders.map((enc) => (
+                    <button
+                      key={enc.id}
+                      className={`rounded-xl border px-4 py-3 text-left transition-all flex items-center justify-between ${
+                        encoderId === enc.id
+                          ? 'bg-fg/10 border-fg/40'
+                          : 'bg-subtle border-border hover:border-zinc-500'
+                      }`}
+                      onClick={() => setEncoderId(enc.id)}
+                    >
+                      <div className="min-w-0">
+                        <div className={`text-sm font-medium ${encoderId === enc.id ? 'text-fg' : 'text-secondary'}`}>
+                          {enc.name}
+                        </div>
+                        <div className="text-xs text-muted mt-0.5 truncate">{enc.description}</div>
+                      </div>
+                      <div
+                        className={`w-4 h-4 rounded-full border flex items-center justify-center shrink-0 ${
+                          encoderId === enc.id ? 'border-fg' : 'border-border'
+                        }`}
+                      >
+                        {encoderId === enc.id && <div className="w-1.5 h-1.5 rounded-full bg-fg" />}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               {/* Warning */}
               {isOverOriginal && (
                 <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20 animate-fadeIn">
@@ -336,6 +407,16 @@ export default function App() {
                     <path d="M12 9v4M12 17h.01M10.29 3.86l-8.6 14.86A2 2 0 003.4 22h17.2a2 2 0 001.71-3.28l-8.6-14.86a2 2 0 00-3.42 0z" strokeLinecap="round" strokeLinejoin="round" />
                   </svg>
                   <span className="text-xs text-amber-300">Target size is not smaller than the original ({fmt(file.rawSize)}). Pick a smaller value to compress.</span>
+                </div>
+              )}
+
+              {/* Backend Error */}
+              {compressError && (
+                <div className="flex items-start gap-3 px-3 py-2.5 rounded-xl bg-red-500/10 border border-red-500/20 animate-fadeIn">
+                  <svg className="w-4 h-4 text-red-400 shrink-0 mt-0.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                    <path d="M12 9v4M12 17h.01M10.29 3.86l-8.6 14.86A2 2 0 003.4 22h17.2a2 2 0 001.71-3.28l-8.6-14.86a2 2 0 00-3.42 0z" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                  <div className="text-xs text-red-300 leading-relaxed">{compressError}</div>
                 </div>
               )}
 
@@ -373,7 +454,6 @@ export default function App() {
                 </svg>
                 <div className="absolute inset-0 flex flex-col items-center justify-center">
                   <span className="text-2xl font-mono font-medium text-fg">{progress}%</span>
-                  <span className="text-[11px] font-mono text-muted mt-0.5">{Math.max(0, Math.round((100 - progress) * 0.18))}s left</span>
                 </div>
               </div>
 
@@ -381,7 +461,7 @@ export default function App() {
               <div className="space-y-1">
                 <h3 className="text-sm font-medium text-fg">{passTitle}</h3>
                 <p className="text-xs text-muted font-mono truncate max-w-sm">
-                  Targeting {effectiveMB} MB
+                  Targeting {fmtMB(effectiveMB)} MB
                 </p>
               </div>
 
@@ -433,15 +513,15 @@ export default function App() {
 
               {/* File Details */}
               <div className="text-xs font-mono text-muted truncate px-1 flex items-center justify-between">
-                <span className="truncate">{file?.name || 'output.mp4'}</span>
-                <span className="shrink-0 text-[11px]">AV1 &bull; 1080p</span>
+                <span className="truncate">{outputPath ? baseName(outputPath) : file?.name || 'output.mp4'}</span>
+                <span className="shrink-0 text-[11px]">{selectedEncoderName || 'Video'} &bull; 1080p</span>
               </div>
 
               {/* Actions */}
               <div className="space-y-2 pt-1">
                 <button
                   className="w-full h-11 rounded-xl bg-fg text-bg font-medium text-xs hover:bg-zinc-200 transition-all flex items-center justify-center gap-1.5"
-                  onClick={() => OpenFile(`${destination}/${file?.name}`).catch(() => {})}
+                  onClick={() => outputPath && OpenFile(outputPath).catch(() => {})}
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                     <path d="M5 3l14 9-14 9V3z" fill="currentColor" />
@@ -451,7 +531,7 @@ export default function App() {
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     className="h-10 rounded-xl bg-subtle hover:bg-zinc-800 border border-border text-xs text-secondary hover:text-fg transition-all flex items-center justify-center gap-1.5"
-                    onClick={() => ShowInFolder(destination).catch(() => {})}
+                    onClick={() => outputPath && ShowInFolder(outputPath).catch(() => {})}
                   >
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                       <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" strokeLinecap="round" strokeLinejoin="round" />

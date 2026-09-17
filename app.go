@@ -13,6 +13,7 @@ import (
 
 	"github.com/OmarNaru1110/byteless/internal/command"
 	"github.com/OmarNaru1110/byteless/internal/domain"
+	"github.com/OmarNaru1110/byteless/internal/util"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -21,7 +22,10 @@ type App struct {
 	ctx             context.Context
 	inputVideo      *domain.Video
 	compressedVideo *domain.OutputVideo
+	cancel          context.CancelFunc
 }
+
+const minVideoBitrateKbps = 100
 
 // NewApp creates a new App application struct
 func NewApp() *App {
@@ -223,4 +227,87 @@ func (a *App) OpenFile(path string) error {
 		return fmt.Errorf("unsupported OS: %s", goRuntime.GOOS)
 	}
 	return cmd.Run()
+}
+
+// GetEncoders returns the list of available video encoders
+func (a *App) GetEncoders() []domain.EncoderInfo {
+	log.Println("App: GetEncoders called")
+	return domain.GetEncoders()
+}
+
+// CancelCompression cancels an in-progress compression
+func (a *App) CancelCompression() {
+	log.Println("App: CancelCompression called")
+	if a.cancel != nil {
+		a.cancel()
+		a.cancel = nil
+	}
+}
+
+func (a *App) CompressVideo(targetSizeMB float64, outputPath string, encoder domain.VideoEncoder) (string, error) {
+	log.Printf("App: CompressVideo called with targetSize=%.2fMB, outputPath=%q, encoder=%q", targetSizeMB, outputPath, encoder)
+
+	if a.inputVideo == nil {
+		log.Printf("App: CompressVideo failed: no input video loaded")
+		return "", fmt.Errorf("no input video loaded")
+	}
+
+	if util.ConvertMBToBytes(targetSizeMB) >= a.inputVideo.Size {
+		log.Printf("App: CompressVideo failed: target size %.2fMB is not smaller than input video size %d bytes", targetSizeMB, a.inputVideo.Size)
+		return "", fmt.Errorf("target size must be smaller than input video size")
+	}
+
+	if outputPath == "" {
+		log.Printf("App: CompressVideo failed: output path is empty")
+		return "", fmt.Errorf("output path cannot be empty")
+	}
+
+	if _, err := os.Stat(outputPath); err != nil {
+		log.Printf("App: CompressVideo failed: output path %q does not exist", outputPath)
+		return "", fmt.Errorf("output path does not exist")
+	}
+
+	a.compressedVideo.TargetSize = targetSizeMB
+	a.compressedVideo.OutputPath = outputPath
+	a.compressedVideo.Encoder = encoder
+	a.compressedVideo.OutputName = util.GenerateName("mp4")
+
+	minPossibleSizeMB, _ := a.GetMinPossibleSize()
+	targetSizeAfterMarginMB := util.ApplyMargin(targetSizeMB, 10)
+	a.compressedVideo.TargetSizeAfterMargin = max(targetSizeAfterMarginMB, minPossibleSizeMB)
+
+	totalBitrateKbps := (a.compressedVideo.TargetSizeAfterMargin * 8192) / float64(a.inputVideo.Duration)
+	targetVideoBitrateKbps := int(totalBitrateKbps - float64(a.inputVideo.AudioBitrate))
+
+	if targetVideoBitrateKbps < minVideoBitrateKbps {
+		log.Printf("App: CompressVideo failed: calculated target bitrate %d kbps is not positive", targetVideoBitrateKbps)
+		return "", fmt.Errorf("target size is too small")
+	}
+
+	ctx, cancel := context.WithCancel(a.ctx)
+	a.cancel = cancel
+
+	pass1Cmd := command.NewTwoPassEncodePass1Command(a.inputVideo.FullPath(), targetVideoBitrateKbps, encoder)
+	if err := pass1Cmd.Execute(ctx, a.inputVideo.Duration); err != nil {
+		log.Printf("App: CompressVideo pass 1 failed: %v", err)
+		return "", err
+	}
+
+	outputFilePath := a.compressedVideo.FullPath()
+	pass2Cmd := command.NewTwoPassEncodePass2Command(a.inputVideo.FullPath(), targetVideoBitrateKbps, outputFilePath, encoder)
+	if err := pass2Cmd.Execute(ctx, a.inputVideo.Duration); err != nil {
+		log.Printf("App: CompressVideo pass 2 failed: %v", err)
+		return "", err
+	}
+
+	log.Printf("App: CompressVideo completed successfully -> %q", outputFilePath)
+	return outputFilePath, nil
+}
+
+func (a *App) GetMinPossibleSize() (float64, error) {
+	if a.inputVideo == nil {
+		return 0, fmt.Errorf("no input video loaded")
+	}
+	minPossibleSizeMB := float64((minVideoBitrateKbps+a.inputVideo.AudioBitrate)*a.inputVideo.Duration) / 8192
+	return minPossibleSizeMB, nil
 }

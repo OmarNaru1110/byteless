@@ -35,7 +35,7 @@ func NewGetVideoDetailsCommand(inputFilePath string) (*GetVideoDetailsCommand, e
 	var ffprobePath string
 	switch runtime.GOOS {
 	case "windows":
-		ffprobePath = "ffprobe.exe"
+		ffprobePath = "D:\\Computer Science\\Projects\\byteless\\build\\bin\\ffprobe.exe"
 	case "darwin", "linux":
 		ffprobePath = "ffprobe"
 	default:
