@@ -2,7 +2,7 @@
 
 > A modern, lightweight, and powerful desktop app for compressing videos to a target size without the eye-bleeding bitrate guessing.
 
-![byteless tour](assets/byteless.jpg)
+![byteless](assets/byteless.png)
 
 <p align="center">
   <img src="https://img.shields.io/github/downloads/OmarNaru1110/byteless/total?style=for-the-badge" alt="GitHub Downloads (all releases)">
