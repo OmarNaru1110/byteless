@@ -55,7 +55,6 @@ export default function App() {
   const [encoderId, setEncoderId] = useState('')
   const [compressError, setCompressError] = useState('')
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const loadingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const dropStageRef = useRef(stage)
 
   const originalSize = file ? file.rawSize : 320.4 * 1024 * 1024
@@ -68,7 +67,7 @@ export default function App() {
   const isOverOriginal = !isNaN(rawTarget) && rawTarget >= originalMB
   const selectedEncoderName = encoders.find((e) => e.id === encoderId)?.name || ''
 
-  const applyVideo = useCallback((info: domain.Video) => {
+  const applyVideo = useCallback(async (info: domain.Video) => {
     const f: FileInfo = {
       name: info.name,
       path: info.path,
@@ -77,33 +76,36 @@ export default function App() {
       type: 'video',
     }
     setFile(f)
-    setStage('loading')
     GetDefaultOutputDir().then(setDestination).catch(() => {})
-    GetMinPossibleSize()
-      .then((min) => {
-        const floor = Math.max(1, min)
-        setMinMB(floor)
-        setTargetMB(floor)
-        setTargetInput(String(floor))
-      })
-      .catch(() => {})
-    if (loadingTimerRef.current) clearTimeout(loadingTimerRef.current)
-    loadingTimerRef.current = setTimeout(() => setStage('config'), 700)
+    try {
+      const min = await GetMinPossibleSize()
+      const floor = Math.max(1, min)
+      setMinMB(floor)
+      setTargetMB(floor)
+      setTargetInput(String(floor))
+    } catch { /* keep defaults */ }
+    setStage('config')
   }, [])
 
   const loadFromPath = useCallback(async (path: string) => {
     setStage('loading')
     try {
-      applyVideo(await LoadVideo(path))
+      const info = await LoadVideo(path)
+      await applyVideo(info)
     } catch {
       setStage('upload')
     }
   }, [applyVideo])
 
   const openVideoPicker = useCallback(async () => {
-    const info = await SelectVideoFile()
-    if (info) applyVideo(info)
-  }, [applyVideo])
+    try {
+      const path = await SelectVideoFile()
+      if (!path) return
+      await loadFromPath(path)
+    } catch {
+      setStage('upload')
+    }
+  }, [loadFromPath])
 
   dropStageRef.current = stage
 
@@ -190,7 +192,6 @@ export default function App() {
 
   useEffect(() => () => {
     if (timerRef.current) clearInterval(timerRef.current)
-    if (loadingTimerRef.current) clearTimeout(loadingTimerRef.current)
   }, [])
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {

@@ -97,8 +97,10 @@ func (a *App) PickFolder(defaultDir string) (string, error) {
 	return path, nil
 }
 
-// SelectVideoFile opens a native video file picker and stores the chosen input
-func (a *App) SelectVideoFile() (*domain.Video, error) {
+// SelectVideoFile opens a native video file picker and returns the chosen path.
+// The caller is expected to load the video afterwards so the UI can show
+// loading feedback while the file is probed.
+func (a *App) SelectVideoFile() (string, error) {
 	log.Println("App: SelectVideoFile opening file dialog")
 	path, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
 		Title: "Choose a video to compress",
@@ -109,14 +111,13 @@ func (a *App) SelectVideoFile() (*domain.Video, error) {
 	})
 	if err != nil {
 		log.Printf("App: SelectVideoFile failed: %v", err)
-		return nil, err
+		return "", err
 	}
 	if path == "" {
 		log.Println("App: SelectVideoFile cancelled by user")
-		return nil, nil
 	}
 	log.Printf("App: SelectVideoFile picked %q", path)
-	return a.LoadVideo(path)
+	return path, nil
 }
 
 // LoadVideo probes the video at path, stores it as the input, and returns its details

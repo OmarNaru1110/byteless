@@ -18,6 +18,6 @@ export function OpenFile(arg1:string):Promise<void>;
 
 export function PickFolder(arg1:string):Promise<string>;
 
-export function SelectVideoFile():Promise<domain.Video>;
+export function SelectVideoFile():Promise<string>;
 
 export function ShowInFolder(arg1:string):Promise<void>;
