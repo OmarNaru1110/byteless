@@ -6,7 +6,6 @@ import (
 	"log"
 	"os"
 	"os/exec"
-	"runtime"
 	"strings"
 
 	"github.com/OmarNaru1110/byteless/internal/builder"
@@ -27,19 +26,9 @@ type GetVideoDetailsCommand struct {
 	builder *builder.FfprobeBuilder
 }
 
-func NewGetVideoDetailsCommand(inputFilePath string) (*GetVideoDetailsCommand, error) {
+func NewGetVideoDetailsCommand(ffprobePath string, inputFilePath string) (*GetVideoDetailsCommand, error) {
 	if _, err := os.Stat(inputFilePath); err != nil {
 		return nil, fmt.Errorf("NewGetVideoDetailsCommand: failed to stat input file: %w", err)
-	}
-
-	var ffprobePath string
-	switch runtime.GOOS {
-	case "windows":
-		ffprobePath = "D:\\Computer Science\\Projects\\byteless\\build\\bin\\ffprobe.exe"
-	case "darwin", "linux":
-		ffprobePath = "ffprobe"
-	default:
-		return nil, fmt.Errorf("NewGetVideoDetailsCommand: unsupported operating system: %s", runtime.GOOS)
 	}
 
 	return &GetVideoDetailsCommand{

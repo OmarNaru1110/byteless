@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/OmarNaru1110/byteless/internal/command"
+	"github.com/OmarNaru1110/byteless/internal/config"
 	"github.com/OmarNaru1110/byteless/internal/domain"
 	"github.com/OmarNaru1110/byteless/internal/util"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -23,13 +24,16 @@ type App struct {
 	inputVideo      *domain.Video
 	compressedVideo *domain.OutputVideo
 	cancel          context.CancelFunc
+	tools           config.Config
 }
 
 const minVideoBitrateKbps = 100
 
 // NewApp creates a new App application struct
 func NewApp() *App {
-	return &App{}
+	return &App{
+		tools: config.Default(),
+	}
 }
 
 // startup is called when the app starts. The context is saved
@@ -140,7 +144,7 @@ func (a *App) probeVideo(path string) (*domain.Video, error) {
 		return nil, fmt.Errorf("path is a directory, expected a video file")
 	}
 
-	cmd, err := command.NewGetVideoDetailsCommand(path)
+	cmd, err := command.NewGetVideoDetailsCommand(a.tools.FFprobePath, path)
 	if err != nil {
 		log.Printf("App: probeVideo failed to build details command: %v", err)
 		return nil, err
@@ -287,14 +291,14 @@ func (a *App) CompressVideo(targetSizeMB float64, outputPath string, encoder dom
 	ctx, cancel := context.WithCancel(a.ctx)
 	a.cancel = cancel
 
-	pass1Cmd := command.NewTwoPassEncodePass1Command(a.inputVideo.FullPath(), targetVideoBitrateKbps, encoder)
+	pass1Cmd := command.NewTwoPassEncodePass1Command(a.tools.FFmpegPath, a.inputVideo.FullPath(), targetVideoBitrateKbps, encoder)
 	if err := pass1Cmd.Execute(ctx, a.inputVideo.Duration); err != nil {
 		log.Printf("App: CompressVideo pass 1 failed: %v", err)
 		return "", err
 	}
 
 	outputFilePath := a.compressedVideo.FullPath()
-	pass2Cmd := command.NewTwoPassEncodePass2Command(a.inputVideo.FullPath(), targetVideoBitrateKbps, outputFilePath, encoder)
+	pass2Cmd := command.NewTwoPassEncodePass2Command(a.tools.FFmpegPath, a.inputVideo.FullPath(), targetVideoBitrateKbps, outputFilePath, encoder)
 	if err := pass2Cmd.Execute(ctx, a.inputVideo.Duration); err != nil {
 		log.Printf("App: CompressVideo pass 2 failed: %v", err)
 		return "", err

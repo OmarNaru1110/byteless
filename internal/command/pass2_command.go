@@ -19,9 +19,9 @@ type TwoPassEncodePass2Command struct {
 	builder *builder.FfmpegBuilder
 }
 
-func NewTwoPassEncodePass2Command(inputPath string, targetVideoBitrateKbps int, outputFilePath string, encoder domain.VideoEncoder) *TwoPassEncodePass2Command {
+func NewTwoPassEncodePass2Command(ffmpegPath string, inputPath string, targetVideoBitrateKbps int, outputFilePath string, encoder domain.VideoEncoder) *TwoPassEncodePass2Command {
 	return &TwoPassEncodePass2Command{
-		builder: builder.NewFfmpegBuilder("D:\\Computer Science\\Projects\\byteless\\build\\bin\\ffmpeg.exe").
+		builder: builder.NewFfmpegBuilder(ffmpegPath).
 			SetInputFilePath(inputPath).
 			SetVideoCodec(string(encoder)).
 			SetVideoBitrate(fmt.Sprintf("%dk", targetVideoBitrateKbps)).
