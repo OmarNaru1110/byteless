@@ -31,9 +31,10 @@ func Default() Config {
 
 // ResolveBinary locates binaryName. Order of preference:
 //  1. the path set via envOverride, if non-empty
-//  2. a bundled copy next to the running executable or in its bin/ subfolder
-//  3. a copy under the working directory or build/bin
-//  4. the system PATH
+//  2. a copy in the user's application config directory, e.g. AppData\Roaming\byto on Windows
+//  3. a bundled copy next to the running executable or in its bin/ subfolder
+//  4. a copy under the working directory or build/bin
+//  5. the system PATH
 //
 // As a last resort the bare binary name is returned so callers still get a
 // useful error from exec instead of a missing command.
@@ -72,6 +73,9 @@ func binarySuffix() string {
 
 func candidateDirs() []string {
 	var dirs []string
+	if dir, err := os.UserConfigDir(); err == nil {
+		dirs = append(dirs, filepath.Join(dir, "byteless"))
+	}
 	if exe, err := os.Executable(); err == nil {
 		dirs = append(dirs, filepath.Dir(exe), filepath.Join(filepath.Dir(exe), "bin"))
 	}
