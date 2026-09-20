@@ -27,7 +27,10 @@ type App struct {
 	tools           config.Config
 }
 
-const minVideoBitrateKbps = 100
+const (
+	minVideoBitrateKbps    = 100
+	outputAudioBitrateKbps = 128
+)
 
 // NewApp creates a new App application struct
 func NewApp() *App {
@@ -285,7 +288,7 @@ func (a *App) CompressVideo(targetSizeMB float64, outputPath string, encoder dom
 	a.compressedVideo.TargetSizeAfterMargin = max(targetSizeAfterMarginMB, minPossibleSizeMB)
 
 	totalBitrateKbps := (a.compressedVideo.TargetSizeAfterMargin * 8192) / float64(a.inputVideo.Duration)
-	targetVideoBitrateKbps := int(totalBitrateKbps - float64(a.inputVideo.AudioBitrate))
+	targetVideoBitrateKbps := int(totalBitrateKbps - outputAudioBitrateKbps)
 
 	if targetVideoBitrateKbps < minVideoBitrateKbps {
 		log.Printf("App: CompressVideo failed: calculated target bitrate %d kbps is not positive", targetVideoBitrateKbps)
@@ -316,6 +319,6 @@ func (a *App) GetMinPossibleSize() (float64, error) {
 	if a.inputVideo == nil {
 		return 0, fmt.Errorf("no input video loaded")
 	}
-	minPossibleSizeMB := float64((minVideoBitrateKbps+a.inputVideo.AudioBitrate)*a.inputVideo.Duration) / 8192
+	minPossibleSizeMB := float64((minVideoBitrateKbps+outputAudioBitrateKbps)*a.inputVideo.Duration) / 8192
 	return minPossibleSizeMB, nil
 }
