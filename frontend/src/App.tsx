@@ -492,7 +492,6 @@ export default function App() {
                   </div>
                   <div>
                     <div className="text-sm font-medium text-fg">Compression Finished</div>
-                    <div className="text-xs text-muted font-mono">Elapsed time: {Math.round(progress * 0.38)}s</div>
                   </div>
                 </div>
                 <span className="text-xs font-mono px-2 py-0.5 rounded bg-subtle border border-border text-fg font-medium">-{reductionPct}%</span>
