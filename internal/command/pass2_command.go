@@ -51,6 +51,7 @@ func (c *TwoPassEncodePass2Command) Execute(ctx context.Context, totalSeconds in
 	log.Printf("TwoPassEncodePass2Command: executing %s %s", ffmpegPath, strings.Join(cmdArgs, " "))
 
 	cmd := exec.CommandContext(ctx, ffmpegPath, cmdArgs...)
+	util.HideWindow(cmd)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

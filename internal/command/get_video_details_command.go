@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/OmarNaru1110/byteless/internal/builder"
+	"github.com/OmarNaru1110/byteless/internal/util"
 )
 
 type FFprobeVideoDetails struct {
@@ -58,6 +59,7 @@ func (c *GetVideoDetailsCommand) Execute() (*FFprobeVideoDetails, error) {
 	log.Printf("GetVideoDetailsCommand: executing command: %s %s", ffprobePath, strings.Join(cmdArgs, " "))
 
 	cmd := exec.Command(ffprobePath, cmdArgs...)
+	util.HideWindow(cmd)
 
 	var stderr strings.Builder
 	cmd.Stderr = &stderr

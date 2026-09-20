@@ -203,6 +203,7 @@ func (a *App) ShowInFolder(path string) error {
 		log.Printf("App: ShowInFolder unsupported OS %q", goRuntime.GOOS)
 		return fmt.Errorf("unsupported OS: %s", goRuntime.GOOS)
 	}
+
 	return cmd.Run()
 }
 
@@ -230,6 +231,9 @@ func (a *App) OpenFile(path string) error {
 		log.Printf("App: OpenFile unsupported OS %q", goRuntime.GOOS)
 		return fmt.Errorf("unsupported OS: %s", goRuntime.GOOS)
 	}
+
+	util.HideWindow(cmd)
+
 	return cmd.Run()
 }
 
