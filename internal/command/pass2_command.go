@@ -12,7 +12,6 @@ import (
 	"github.com/OmarNaru1110/byteless/internal/builder"
 	"github.com/OmarNaru1110/byteless/internal/domain"
 	"github.com/OmarNaru1110/byteless/internal/util"
-	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 type TwoPassEncodePass2Command struct {
@@ -77,7 +76,7 @@ func (c *TwoPassEncodePass2Command) Execute(ctx context.Context, totalSeconds in
 			percent := float64(timeSeconds) / float64(totalSeconds) * 100
 			fmt.Printf("\rTwoPassEncodePass2Command: encoding progress: %.2f%%", percent)
 
-			runtime.EventsEmit(ctx, "pass2Progress", fmt.Sprintf("%.0f", percent))
+			EmitEvent(ctx, "pass2Progress", fmt.Sprintf("%.0f", percent))
 		}
 	}
 

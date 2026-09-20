@@ -47,6 +47,9 @@ func (a *App) startup(ctx context.Context) {
 
 // GetDefaultOutputDir returns the default folder for compressed videos
 func (a *App) GetDefaultOutputDir() string {
+	if a.compressedVideo == nil {
+		a.compressedVideo = &domain.OutputVideo{}
+	}
 	a.compressedVideo.OutputPath = a.defaultOutputDir()
 	log.Printf("App: GetDefaultOutputDir -> %q", a.compressedVideo.OutputPath)
 	return a.compressedVideo.OutputPath
