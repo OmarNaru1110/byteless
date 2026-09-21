@@ -56,6 +56,7 @@ export default function App() {
   const [compressError, setCompressError] = useState('')
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const dropStageRef = useRef(stage)
+  const cancelledRef = useRef(false)
 
   const originalSize = file ? file.rawSize : 320.4 * 1024 * 1024
   const originalMB = originalSize / (1024 * 1024)
@@ -156,6 +157,7 @@ export default function App() {
       setProgress(Math.min(100, Math.max(0, p)))
     })
 
+    cancelledRef.current = false
     try {
       const result = await CompressVideo(effectiveMB, destination, encoderId)
       setOutputPath(result)
@@ -166,11 +168,14 @@ export default function App() {
       offPass1()
       offPass2()
       setStage('config')
-      setCompressError(err instanceof Error ? err.message : String(err))
+      if (!cancelledRef.current) {
+        setCompressError(err instanceof Error ? err.message : String(err))
+      }
     }
   }
 
   const cancelCompression = () => {
+    cancelledRef.current = true
     CancelCompression()
     setStage('config')
   }
