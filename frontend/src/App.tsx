@@ -600,7 +600,7 @@ export default function App() {
                 </button>
 
                 {/* Ko-fi */}
-                <button className="w-full flex items-center gap-3 px-3.5 py-3 rounded-xl bg-[#17181c] border border-[#262830] hover:bg-[#1f2127] text-left transition-colors group" onClick={() => BrowserOpenURL('https://ko-fi.com')}>
+                <button className="w-full flex items-center gap-3 px-3.5 py-3 rounded-xl bg-[#17181c] border border-[#262830] hover:bg-[#1f2127] text-left transition-colors group" onClick={() => BrowserOpenURL('https://ko-fi.com/omarnaru')}>
                   <svg className="w-4 h-4 text-zinc-300 shrink-0" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24">
                     <path d="M17 8h1a4 4 0 1 1 0 8h-1" />
                     <path d="M3 8h14v9a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4Z" />
